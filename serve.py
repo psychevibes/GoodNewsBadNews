@@ -54,7 +54,7 @@ def main():
             print(f"\n🚀 News Sentiment Dashboard server starting...")
             print(f"📡 Server running at: http://localhost:{PORT}")
             print(f"📰 Dashboard URL: http://localhost:{PORT}/index.html")
-            print(f"✏️  Headlines Editor: http://localhost:{PORT}/headlines.html")
+            print(f"📰 Headlines: http://localhost:{PORT}/headlines.html")
             print("\n🛑 Press Ctrl+C to stop the server\n")
             
             # Check if data files exist

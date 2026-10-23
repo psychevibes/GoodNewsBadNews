@@ -1,910 +1,418 @@
-/*
- * Main application script for the News Sentiment Dashboard
- *
- * This script loads sentiment data from JSON endpoints, allows users to
- * filter by news source, and renders a collection of charts using
- * Chart.js. Additional widgets display summary statistics and the
- * latest headlines. Where possible we avoid modifying DOM elements
- * directly and instead use helper functions to keep the code
- * organised.
- */
+import { Dom, Feed, Score } from './score.js';
 
-// Base URL where the data JSON files live. When the dashboard is served
-// from GitHub Pages the `data` directory sits alongside `index.html`.
-// Using a relative path ensures the fetch requests work correctly
-// regardless of whether the app is hosted on GitHub Pages or opened
-// locally from the filesystem. The trailing slash is important so
-// that `latest.json` resolves to `./data/latest.json`.
-const DATA_BASE_URL = './data/';
-
-// Colour definitions matching those in styles.css
-const COLOR = {
-  positive: '#10b981', // Emerald
-  neutral: '#94a3b8',  // Slate
-  negative: '#ef4444', // Red
-  text: '#f8fafc',     // Slate 50
-  grid: 'rgba(255,255,255,0.1)',
+const ICONS = {
+  alert: '<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 8v5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 16.5h.01" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>',
+  retry: '<path d="M4 12a8 8 0 1 0 2.3-5.7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 4v5h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  empty: '<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M8 12h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
 };
 
-// A small set of common English stop words used when extracting
-// trending keywords. These are lower‑case and should cover most
-// frequently used words that add little meaning.
-const STOPWORDS = new Set([
-  'the', 'a', 'an', 'to', 'of', 'and', 'in', 'on', 'for', 'with', 'at', 'by', 'from', 'up', 'about', 'into', 'over', 'after',
-  'under', 'above', 'below', 'between', 'through', 'during', 'before', 'again', 'further', 'then', 'once', 'all', 'am', 'is',
-  'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'but', 'if',
-  'or', 'because', 'as', 'until', 'while', 'nor', 'so', 'than', 'too', 'very', 'can', 'will', 'just', 'more', 'most',
-  'other', 'some', 'such', 'no', 'not', 'only', 'own', 'same', 's', 't', 're', 'll', 'd', 've', 'm', 'y', 'don', 'should', 'now',
-]);
-
-// Global state object to store loaded data and selected sources
-const globalData = {
-  latest: null,
-  history: null,
-  selectedSources: new Set(),
-};
-
-// Keep references to chart instances so we can destroy them on update
-let overallChart;
-let pubChart;
-let topicChart;
-let trendChart;
-let regionChart;
-let keywordsChart;
-
-/**
- * Fetch a JSON file from a URL. Returns a parsed object. Throws
- * if the network request fails or if the response is not valid JSON.
- * @param {string} url
- */
-async function fetchJSON(url) {
-  console.log(`Fetching ${url}...`);
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to load ${url}: ${response.status} ${response.statusText}`);
+class Dashboard {
+  constructor(root) {
+    this.root = root;
+    this.token = 0;
+    this.score = null;
   }
-  const data = await response.json();
-  console.log(`Successfully loaded ${url}`, data);
-  return data;
-}
 
-/**
- * Fetch latest and history data. If local data is unavailable the
- * function will fall back to using the remote URLs defined above.
- */
-async function loadData() {
-  try {
-    console.log('Loading dashboard data...');
-    const latest = await fetchJSON(`${DATA_BASE_URL}latest.json`);
-    const history = await fetchJSON(`${DATA_BASE_URL}history.json`);
+  async start() {
+    const token = ++this.token;
+    this.showLoading();
+    try {
+      const [latest, history, all] = await Promise.all([
+        Feed.json('data/latest.json'),
+        Feed.json('data/history.json'),
+        Feed.json('data/all_headlines.json'),
+      ]);
+      if (token !== this.token) return;
+      this.render(latest, history, all);
+    } catch (error) {
+      if (token !== this.token) return;
+      this.showError();
+    }
+  }
 
-    console.log('Data loaded successfully:', {
-      latestArticles: latest.totals,
-      historyDays: history.history?.length
+  showLoading() {
+    this.hideWinner();
+    this.root.ariaBusy = 'true';
+    this.root.replaceChildren(
+      Dom.el('div', { class: 'skel skel-hero', 'aria-hidden': 'true' }),
+      Dom.el('div', { class: 'wrap page-stack' }, [
+        Dom.el('div', { class: 'skel skel-title' }),
+        Dom.el('div', { class: 'skel-grid' }, [
+          Dom.el('div', { class: 'skel skel-card' }),
+          Dom.el('div', { class: 'skel skel-card' }),
+          Dom.el('div', { class: 'skel skel-card' }),
+          Dom.el('div', { class: 'skel skel-card' }),
+        ]),
+        Dom.el('div', { class: 'skel skel-bar' }),
+      ]),
+    );
+  }
+
+  showError() {
+    this.hideWinner();
+    this.root.ariaBusy = 'false';
+    this.root.replaceChildren(Dom.el('div', { class: 'state' }, [
+      Dom.el('div', { class: 'state-card' }, [
+        Dom.el('div', { class: 'state-mark error' }, [Dom.svg(ICONS.retry)]),
+        Dom.el('h2', { text: "The score didn't load" }),
+        Dom.el('p', { class: 'muted', text: 'Check your connection and try again.' }),
+        Dom.el('button', { class: 'btn btn-dark', type: 'button', text: 'Try again', onClick: () => this.start() }),
+      ]),
+    ]));
+  }
+
+  showEmpty(latest) {
+    this.hideWinner();
+    this.applyMeta(latest, 0);
+    this.root.ariaBusy = 'false';
+    this.root.replaceChildren(Dom.el('div', { class: 'state' }, [
+      Dom.el('div', { class: 'state-card' }, [
+        Dom.el('div', { class: 'state-mark' }, [Dom.svg(ICONS.empty)]),
+        Dom.el('h2', { text: 'No headlines in the last 24 hours' }),
+        Dom.el('p', { class: 'muted', text: "The feeds were quiet, so there's no score to show." }),
+      ]),
+    ]));
+  }
+
+  hideWinner() {
+    const winner = document.getElementById('winner');
+    if (winner) winner.hidden = true;
+  }
+
+  applyMeta(latest, outlets) {
+    const stamp = latest?.generated_at ? Score.stamp(latest.generated_at) : '—';
+    document.querySelectorAll('[data-feed-count]').forEach((node) => {
+      node.textContent = outlets ? Score.formatCount(outlets) : 'the';
     });
-
-    return { latest, history };
-  } catch (e) {
-    console.error('Error fetching data:', e);
-
-    // Show user-friendly error message
-    document.getElementById('generatedAt').textContent = 'Error loading data - check console for details';
-
-    // Try to provide fallback or helpful information
-    throw new Error(`Failed to load dashboard data: ${e.message}`);
-  }
-}
-
-/**
- * Build the sources list in the sidebar. Each source can be toggled
- * individually, allowing the user to filter the dashboard. When no
- * sources are selected the dashboard shows all data. Sources are
- * sorted alphabetically for easier scanning.
- * @param {Array} byPublication
- */
-function renderSourcesList(byPublication) {
-  const listEl = document.getElementById('sourcesList');
-  listEl.innerHTML = '';
-
-  if (!byPublication || byPublication.length === 0) {
-    listEl.innerHTML = '<div class="source-item">No sources available</div>';
-    return;
-  }
-
-  // Sort sources alphabetically
-  const sorted = [...byPublication].sort((a, b) =>
-    a.source.localeCompare(b.source)
-  );
-
-  sorted.forEach((item) => {
-    const li = document.createElement('div');
-    li.className = 'source-item';
-    li.dataset.source = item.source;
-    li.innerHTML = `<span>${item.source}</span><span>${item.count}</span>`;
-    li.addEventListener('click', () => {
-      toggleSource(item.source);
+    document.querySelectorAll('[data-generated]').forEach((node) => {
+      node.textContent = stamp;
+      if (latest?.generated_at) node.dateTime = latest.generated_at;
     });
-    listEl.appendChild(li);
-  });
-
-  updateSourceVisuals();
-}
-
-/**
- * Toggle a source in the selected set. If the source is already
- * selected it will be removed; otherwise it will be added. Then
- * refresh the dashboard.
- * @param {string} source
- */
-function toggleSource(source) {
-  if (globalData.selectedSources.has(source)) {
-    globalData.selectedSources.delete(source);
-  } else {
-    globalData.selectedSources.add(source);
-  }
-  updateSourceVisuals();
-  updateDashboard();
-}
-
-/**
- * Highlight selected sources in the sidebar.
- */
-function updateSourceVisuals() {
-  const items = document.querySelectorAll('.source-item');
-  items.forEach((item) => {
-    const sourceName = item.dataset.source;
-    if (globalData.selectedSources.has(sourceName)) {
-      item.classList.add('selected');
-    } else {
-      item.classList.remove('selected');
-    }
-  });
-}
-
-/**
- * Select all sources. Called when the user clicks the All button.
- */
-function selectAllSources() {
-  if (!globalData.latest?.by_publication) return;
-
-  globalData.latest.by_publication.forEach((item) => {
-    globalData.selectedSources.add(item.source);
-  });
-  updateSourceVisuals();
-  updateDashboard();
-}
-
-/**
- * Deselect all sources. Called when the user clicks the None button.
- */
-function deselectAllSources() {
-  globalData.selectedSources.clear();
-  updateSourceVisuals();
-  updateDashboard();
-}
-
-/**
- * Filter the latest data based on the currently selected sources.
- * Returns an object with recalculated totals, publication list,
- * topic list, region list and sample headlines. When no sources are
- * selected this function returns the original data unchanged.
- * @param {Object} latest
- * @param {Set<string>} selected
- */
-function filterDataBySources(latest, selected) {
-  if (!latest) return {
-    totals: { positive: 0, neutral: 0, negative: 0 },
-    by_publication: [],
-    by_topic: [],
-    by_region: [],
-    sample_headlines: []
-  };
-
-  if (!selected || selected.size === 0) {
-    // Nothing selected: return original data
-    return {
-      totals: latest.totals || { positive: 0, neutral: 0, negative: 0 },
-      by_publication: latest.by_publication || [],
-      by_topic: latest.by_topic || [],
-      by_region: latest.by_region || [],
-      sample_headlines: latest.sample_headlines || [],
-    };
   }
 
-  // Filter by publication
-  const filteredPublications = (latest.by_publication || []).filter((item) =>
-    selected.has(item.source)
-  );
-
-  // Recalculate totals
-  const totals = filteredPublications.reduce(
-    (acc, item) => {
-      acc.positive += item.positive || 0;
-      acc.neutral += item.neutral || 0;
-      acc.negative += item.negative || 0;
-      return acc;
-    },
-    { positive: 0, neutral: 0, negative: 0 }
-  );
-
-  // Filter sample headlines by source
-  const filteredHeadlines = (latest.sample_headlines || []).filter((h) =>
-    selected.has(h.source)
-  );
-
-  // For topics and regions, we keep the original data since we don't have
-  // per-publication topic/region breakdowns in the current data structure
-  const filteredByTopic = latest.by_topic || [];
-
-  // Recalculate by_region from filtered publications
-  const regionMap = {};
-  filteredPublications.forEach((pub) => {
-    const region = pub.region || 'Other';
-    if (!regionMap[region]) {
-      regionMap[region] = { positive: 0, neutral: 0, negative: 0 };
-    }
-    regionMap[region].positive += pub.positive || 0;
-    regionMap[region].neutral += pub.neutral || 0;
-    regionMap[region].negative += pub.negative || 0;
-  });
-
-  const filteredByRegion = Object.entries(regionMap).map(([region, val]) => ({
-    region,
-    positive: val.positive,
-    neutral: val.neutral,
-    negative: val.negative,
-    count: val.positive + val.neutral + val.negative,
-  }));
-
-  return {
-    totals,
-    by_publication: filteredPublications,
-    by_topic: filteredByTopic,
-    by_region: filteredByRegion,
-    sample_headlines: filteredHeadlines,
-  };
-}
-
-/**
- * Update the summary statistic cards with new totals. If a value
- * changes, the count will animate smoothly from its current value
- * to the new value.
- * @param {Object} totals
- */
-function updateStats(totals) {
-  if (!totals) {
-    totals = { positive: 0, neutral: 0, negative: 0 };
+  fillWinner(latest, total, outlets) {
+    const winner = document.getElementById('winner');
+    if (!winner) return;
+    const result = Score.winner(latest.totals.positive, latest.totals.negative, latest.totals.neutral);
+    winner.hidden = false;
+    winner.replaceChildren(
+      Dom.el('span', { class: 'winner-kicker caps', text: 'Today' }),
+      Dom.el('span', {
+        class: 'winner-long',
+        text: `${result.long} · ${Score.formatCount(total)} headlines · ${Score.formatCount(outlets)} outlets`,
+      }),
+      Dom.el('span', { class: 'winner-short', text: result.short }),
+    );
   }
 
-  animateCounter('positiveCount', totals.positive || 0);
-  animateCounter('neutralCount', totals.neutral || 0);
-  animateCounter('negativeCount', totals.negative || 0);
-  animateCounter('totalCount', (totals.positive || 0) + (totals.neutral || 0) + (totals.negative || 0));
-}
-
-/**
- * Animate a numeric counter from its current displayed value to a
- * target value. Uses a simple ease‑out function for a smoother
- * appearance.
- * @param {string} id
- * @param {number} targetValue
- */
-function animateCounter(id, targetValue) {
-  const el = document.getElementById(id);
-  if (!el) return;
-
-  const startValue = parseInt(el.innerText.replace(/,/g, '')) || 0;
-  const duration = 500;
-  const startTime = performance.now();
-
-  function update(currentTime) {
-    const elapsed = currentTime - startTime;
-    const progress = Math.min(elapsed / duration, 1);
-    const eased = 1 - Math.pow(1 - progress, 4);
-    const current = Math.floor(startValue + (targetValue - startValue) * eased);
-    el.innerText = current.toLocaleString();
-    if (progress < 1) requestAnimationFrame(update);
-  }
-  requestAnimationFrame(update);
-}
-
-/**
- * Render or update the sentiment distribution doughnut chart. If a
- * previous instance exists, it will be destroyed before creating
- * a new one.
- * @param {Object} totals
- */
-function renderOverallChart(totals) {
-  const canvas = document.getElementById('overallChart');
-  if (!canvas) return;
-
-  const ctx = canvas.getContext('2d');
-  if (overallChart) overallChart.destroy();
-
-  const data = [totals.positive || 0, totals.neutral || 0, totals.negative || 0];
-  const hasData = data.some(val => val > 0);
-
-  if (!hasData) {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = COLOR.text;
-    ctx.textAlign = 'center';
-    ctx.font = '14px Inter';
-    ctx.fillText('No data available', canvas.width / 2, canvas.height / 2);
-    return;
-  }
-
-  overallChart = new Chart(ctx, {
-    type: 'doughnut',
-    data: {
-      labels: ['Positive', 'Neutral', 'Negative'],
-      datasets: [
-        {
-          data: data,
-          backgroundColor: [COLOR.positive, COLOR.neutral, COLOR.negative],
-          borderWidth: 0,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: {
-        duration: 0 // Disable animations to prevent resize loops
-      },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: function (context) {
-              const total = context.dataset.data.reduce((a, b) => a + b, 0);
-              const value = context.parsed;
-              const pct = total ? ((value / total) * 100).toFixed(1) : 0;
-              return `${context.label}: ${value} (${pct}%)`;
-            },
-          },
-        },
-      },
-      onResize: function (chart, size) {
-        // Prevent excessive resizing
-        if (size.height > 300) {
-          chart.canvas.style.height = '280px';
-        }
-      }
-    },
-  });
-}
-
-/**
- * Render or update the by publication bar chart. Top N publications
- * will be shown depending on sort criteria.
- * @param {Array} byPub
- * @param {string} sortBy
- */
-function renderPublicationChart(byPub, sortBy) {
-  const canvas = document.getElementById('pubChart');
-  if (!canvas) return;
-
-  const ctx = canvas.getContext('2d');
-  if (pubChart) pubChart.destroy();
-
-  if (!byPub || byPub.length === 0) {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = COLOR.text;
-    ctx.textAlign = 'center';
-    ctx.font = '14px Inter';
-    ctx.fillText('No publications data', canvas.width / 2, canvas.height / 2);
-    return;
-  }
-
-  // Sort the data
-  const sorted = [...byPub].sort((a, b) => {
-    if (sortBy === 'count') {
-      return (b.count || 0) - (a.count || 0);
-    }
-    return (b[sortBy] || 0) - (a[sortBy] || 0);
-  });
-
-  const top = sorted.slice(0, 8);
-  const labels = top.map((item) =>
-    item.source && item.source.length > 12 ? item.source.slice(0, 12) + '…' : item.source
-  );
-  const pos = top.map((item) => item.positive || 0);
-  const neu = top.map((item) => item.neutral || 0);
-  const neg = top.map((item) => item.negative || 0);
-
-  pubChart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: labels,
-      datasets: [
-        {
-          label: 'Positive',
-          data: pos,
-          backgroundColor: COLOR.positive,
-        },
-        {
-          label: 'Neutral',
-          data: neu,
-          backgroundColor: COLOR.neutral,
-        },
-        {
-          label: 'Negative',
-          data: neg,
-          backgroundColor: COLOR.negative,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: { duration: 0 },
-      scales: {
-        x: { stacked: true, ticks: { color: COLOR.text } },
-        y: { stacked: true, ticks: { color: COLOR.text } },
-      },
-      plugins: {
-        legend: { display: false },
-      },
-      onResize: function (chart, size) {
-        if (size.height > 300) {
-          chart.canvas.style.height = '280px';
-        }
-      }
-    },
-  });
-}
-
-/**
- * Render or update the by topic bar chart. Shows all topics sorted
- * by total count.
- * @param {Array} byTopic
- */
-function renderTopicChart(byTopic) {
-  const canvas = document.getElementById('topicChart');
-  if (!canvas) return;
-
-  const ctx = canvas.getContext('2d');
-  if (topicChart) topicChart.destroy();
-
-  if (!byTopic || byTopic.length === 0) {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = COLOR.text;
-    ctx.textAlign = 'center';
-    ctx.font = '14px Inter';
-    ctx.fillText('No topics data', canvas.width / 2, canvas.height / 2);
-    return;
-  }
-
-  const sorted = [...byTopic].sort((a, b) => (b.count || 0) - (a.count || 0));
-  const labels = sorted.map((item) => item.topic);
-  const pos = sorted.map((item) => item.positive || 0);
-  const neu = sorted.map((item) => item.neutral || 0);
-  const neg = sorted.map((item) => item.negative || 0);
-
-  topicChart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: labels,
-      datasets: [
-        { label: 'Positive', data: pos, backgroundColor: COLOR.positive },
-        { label: 'Neutral', data: neu, backgroundColor: COLOR.neutral },
-        { label: 'Negative', data: neg, backgroundColor: COLOR.negative },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: { duration: 0 },
-      scales: {
-        x: { stacked: true, ticks: { color: COLOR.text } },
-        y: { stacked: true, ticks: { color: COLOR.text } },
-      },
-      plugins: { legend: { display: false } },
-      onResize: function (chart, size) {
-        if (size.height > 300) {
-          chart.canvas.style.height = '280px';
-        }
-      }
-    },
-  });
-}
-
-/**
- * Render or update the 7‑day trend line chart. Data is not affected
- * by source filtering.
- * @param {Array} historyArr
- */
-function renderTrendChart(historyArr) {
-  const canvas = document.getElementById('trendChart');
-  if (!canvas) return;
-
-  const ctx = canvas.getContext('2d');
-  if (trendChart) trendChart.destroy();
-
-  if (!historyArr || historyArr.length === 0) {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = COLOR.text;
-    ctx.textAlign = 'center';
-    ctx.font = '14px Inter';
-    ctx.fillText('No trend data', canvas.width / 2, canvas.height / 2);
-    return;
-  }
-
-  const labels = historyArr.map((h) => {
-    const d = new Date(h.date);
-    return d.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' });
-  });
-  const pos = historyArr.map((h) => h.positive || 0);
-  const neu = historyArr.map((h) => h.neutral || 0);
-  const neg = historyArr.map((h) => h.negative || 0);
-
-  trendChart = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: labels,
-      datasets: [
-        {
-          label: 'Positive',
-          data: pos,
-          borderColor: COLOR.positive,
-          backgroundColor: `${COLOR.positive}33`,
-          tension: 0.4,
-          fill: false,
-        },
-        {
-          label: 'Neutral',
-          data: neu,
-          borderColor: COLOR.neutral,
-          backgroundColor: `${COLOR.neutral}33`,
-          tension: 0.4,
-          fill: false,
-        },
-        {
-          label: 'Negative',
-          data: neg,
-          borderColor: COLOR.negative,
-          backgroundColor: `${COLOR.negative}33`,
-          tension: 0.4,
-          fill: false,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: { duration: 0 },
-      scales: {
-        x: { ticks: { color: COLOR.text } },
-        y: { ticks: { color: COLOR.text } },
-      },
-      plugins: {
-        legend: {
-          display: true,
-          labels: { color: COLOR.text }
-        }
-      },
-      onResize: function (chart, size) {
-        if (size.height > 300) {
-          chart.canvas.style.height = '280px';
-        }
-      }
-    },
-  });
-}
-
-/**
- * Render or update the regional sentiment bar chart.
- * @param {Array} byRegion
- */
-function renderRegionChart(byRegion) {
-  const canvas = document.getElementById('regionChart');
-  if (!canvas) return;
-
-  const ctx = canvas.getContext('2d');
-  if (regionChart) regionChart.destroy();
-
-  if (!byRegion || byRegion.length === 0) {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = COLOR.text;
-    ctx.textAlign = 'center';
-    ctx.font = '14px Inter';
-    ctx.fillText('No regions data', canvas.width / 2, canvas.height / 2);
-    return;
-  }
-
-  const sorted = [...byRegion].sort((a, b) => (b.count || 0) - (a.count || 0));
-  const labels = sorted.map((item) => item.region);
-  const pos = sorted.map((item) => item.positive || 0);
-  const neu = sorted.map((item) => item.neutral || 0);
-  const neg = sorted.map((item) => item.negative || 0);
-
-  regionChart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: labels,
-      datasets: [
-        { label: 'Positive', data: pos, backgroundColor: COLOR.positive },
-        { label: 'Neutral', data: neu, backgroundColor: COLOR.neutral },
-        { label: 'Negative', data: neg, backgroundColor: COLOR.negative },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: { duration: 0 },
-      scales: {
-        x: { stacked: true, ticks: { color: COLOR.text } },
-        y: { stacked: true, ticks: { color: COLOR.text } },
-      },
-      plugins: { legend: { display: false } },
-      onResize: function (chart, size) {
-        if (size.height > 300) {
-          chart.canvas.style.height = '280px';
-        }
-      }
-    },
-  });
-}
-
-/**
- * Extract the top keywords from the list of headlines. Filtering by
- * sentiment will include only headlines matching the chosen
- * sentiment ('positive', 'negative', or 'all'). Returns an array
- * of objects with keyword and count properties.
- * @param {Array} headlines
- * @param {string} sentimentFilter
- * @param {number} topN
- */
-function extractTopKeywords(headlines, sentimentFilter = 'all', topN = 10) {
-  if (!headlines || headlines.length === 0) return [];
-
-  const freq = {};
-  headlines.forEach((item) => {
-    if (sentimentFilter !== 'all' && item.sentiment !== sentimentFilter) {
+  render(latest, history, all) {
+    const totals = latest.totals || { positive: 0, neutral: 0, negative: 0 };
+    const total = totals.positive + totals.neutral + totals.negative;
+    const outlets = (latest.by_publication || []).length;
+    this.applyMeta(latest, outlets);
+    if (!total) {
+      this.showEmpty(latest);
       return;
     }
-    const words = (item.title || '')
-      .toLowerCase()
-      .replace(/[^a-z\s]/g, ' ')
-      .split(/\s+/)
-      .filter((w) => w && w.length > 2 && !STOPWORDS.has(w));
-    words.forEach((word) => {
-      freq[word] = (freq[word] || 0) + 1;
-    });
-  });
-
-  const sorted = Object.entries(freq)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, topN);
-  return sorted.map(([keyword, count]) => ({ keyword, count }));
-}
-
-/**
- * Render or update the trending keywords bar chart.
- * @param {Array} keywordsData
- */
-function renderKeywordsChart(keywordsData) {
-  const canvas = document.getElementById('keywordsChart');
-  if (!canvas) return;
-
-  const ctx = canvas.getContext('2d');
-  if (keywordsChart) keywordsChart.destroy();
-
-  if (!keywordsData || keywordsData.length === 0) {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = COLOR.text;
-    ctx.textAlign = 'center';
-    ctx.font = '14px Inter';
-    ctx.fillText('No keywords found', canvas.width / 2, canvas.height / 2);
-    return;
+    this.score = { latest, totals, total, outlets };
+    this.fillWinner(latest, total, outlets);
+    const generated = Score.oldest(latest.generated_at, history.generated_at, all.generated_at);
+    const kept = Score.visibleHeadlines(all.headlines || latest.sample_headlines || [], all.generated_at || latest.generated_at);
+    const goodStories = Score.sortHeadlines(kept.filter((item) => Score.sentimentKey(item.sentiment) === 'good')).slice(0, 4);
+    const badStories = Score.sortHeadlines(kept.filter((item) => Score.sentimentKey(item.sentiment) === 'bad')).slice(0, 4);
+    const banner = Score.isStale(generated) ? this.staleBanner(generated) : null;
+    const stack = Dom.el('div', { class: 'wrap page-stack' }, [
+      this.sides(totals, goodStories, badStories),
+      this.week(history, latest.generated_at),
+      this.where(latest),
+      this.shareSection(),
+    ]);
+    this.root.ariaBusy = 'false';
+    this.root.replaceChildren(...[banner, this.hero(latest, totals, total, outlets), stack].filter(Boolean));
+    this.bindShare();
   }
 
-  const labels = keywordsData.map((k) => k.keyword);
-  const counts = keywordsData.map((k) => k.count);
+  staleBanner(iso) {
+    return Dom.el('div', { class: 'wrap' }, [
+      Dom.el('div', { class: 'banner', role: 'status' }, [
+        Dom.svg(ICONS.alert),
+        Dom.el('p', { text: Score.staleCopy(iso) }),
+      ]),
+    ]);
+  }
 
-  keywordsChart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: labels,
-      datasets: [
-        {
-          label: 'Frequency',
-          data: counts,
-          backgroundColor: COLOR.positive,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: { duration: 0 },
-      scales: {
-        x: { ticks: { color: COLOR.text } },
-        y: { ticks: { color: COLOR.text } },
-      },
-      plugins: { legend: { display: false } },
-      onResize: function (chart, size) {
-        if (size.height > 300) {
-          chart.canvas.style.height = '280px';
-        }
+  hero(latest, totals, total, outlets) {
+    const parts = Score.londonParts(latest.generated_at);
+    const hero = Dom.el('section', { class: 'hero', id: 'today', 'aria-label': "Today's score" });
+    const bands = [
+      ['good', totals.positive, `${Score.formatPercent(totals.positive, total)}`, `${Score.formatCount(totals.positive)} good headlines`],
+      ['neutral', totals.neutral, `${Score.formatPercent(totals.neutral, total)}`, 'Neutral'],
+      ['bad', totals.negative, `${Score.formatPercent(totals.negative, total)}`, `${Score.formatCount(totals.negative)} bad headlines`],
+    ];
+    bands.forEach(([name, count, pct, sub]) => {
+      if (!count) return;
+      const band = Dom.el('div', { class: `hero-band hero-${name}` });
+      band.style.flex = `${count} 1 0`;
+      if (name === 'neutral') {
+        band.append(
+          Dom.el('p', { class: 'caps', text: 'Neutral' }),
+          Dom.el('p', { class: 'hero-pct num', text: pct }),
+        );
+      } else {
+        band.append(
+          Dom.el('p', { class: 'hero-pct num', text: pct }),
+          Dom.el('p', { class: 'hero-sub', text: sub }),
+        );
       }
-    },
-  });
-}
-
-/**
- * Render the headlines list. Displays title, source and how long
- * ago the article was published. Only the first 30 headlines are
- * shown for brevity.
- * @param {Array} headlines
- */
-function renderHeadlinesList(headlines) {
-  const listEl = document.getElementById('headlines');
-  if (!listEl) return;
-
-  listEl.innerHTML = '';
-
-  if (!headlines || headlines.length === 0) {
-    listEl.innerHTML = '<li><span class="headline-title">No headlines available</span></li>';
-    document.getElementById('headlinesCount').textContent = '0 articles';
-    return;
-  }
-
-  const slice = headlines.slice(0, 30);
-  slice.forEach((item) => {
-    const li = document.createElement('li');
-    const title = document.createElement('span');
-    title.className = 'headline-title';
-    title.textContent = item.title || 'Untitled';
-    const meta = document.createElement('span');
-    meta.className = 'headline-meta';
-    meta.textContent = `${item.source || 'Unknown'} • ${formatTimeAgo(item.published)}`;
-    li.appendChild(title);
-    li.appendChild(meta);
-    listEl.appendChild(li);
-  });
-
-  const countEl = document.getElementById('headlinesCount');
-  if (countEl) {
-    countEl.textContent = `${headlines.length} articles`;
-  }
-}
-
-/**
- * Convert an ISO timestamp into a relative time string (e.g. 2h ago).
- * @param {string} iso
- */
-function formatTimeAgo(iso) {
-  if (!iso) return 'Unknown';
-
-  try {
-    const published = new Date(iso);
-    const now = new Date();
-    const diff = Math.floor((now - published) / 1000);
-    if (diff < 60) return 'Just now';
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-    return `${Math.floor(diff / 86400)}d ago`;
-  } catch (e) {
-    return 'Unknown';
-  }
-}
-
-/**
- * Update all charts and widgets based on current state. This
- * function is called whenever data is loaded or the selected
- * sources change.
- */
-function updateDashboard() {
-  if (!globalData.latest) {
-    console.warn('No data available for dashboard update');
-    return;
-  }
-
-  console.log('Updating dashboard with current data');
-  const filtered = filterDataBySources(globalData.latest, globalData.selectedSources);
-
-  updateStats(filtered.totals);
-
-  // Add small delay to prevent resize loops when multiple charts update
-  requestAnimationFrame(() => {
-    renderOverallChart(filtered.totals);
-
-    // Determine sort option for publication chart
-    const sortBy = document.getElementById('pubSort')?.value || 'count';
-    renderPublicationChart(filtered.by_publication, sortBy);
-
-    renderTopicChart(filtered.by_topic);
-    renderRegionChart(filtered.by_region);
-
-    // Keywords sentiment filter
-    const kwFilter = document.getElementById('keywordsSentiment')?.value || 'all';
-    const keywordsData = extractTopKeywords(filtered.sample_headlines, kwFilter, 10);
-    renderKeywordsChart(keywordsData);
-  });
-
-  renderHeadlinesList(filtered.sample_headlines);
-}
-
-/**
- * Initialise the dashboard: load data, set up event listeners and
- * render everything for the first time.
- */
-async function init() {
-  console.log('Initializing dashboard...');
-
-  try {
-    // Check if Chart.js loaded
-    if (typeof Chart === 'undefined') {
-      throw new Error('Chart.js failed to load. Please check your internet connection.');
-    }
-
-    const { latest, history } = await loadData();
-    globalData.latest = latest;
-    globalData.history = history;
-
-    // Set update time
-    const updateDate = new Date(latest.generated_at);
-    const generatedAtEl = document.getElementById('generatedAt');
-    if (generatedAtEl) {
-      generatedAtEl.textContent = `Last updated ${updateDate.toLocaleString('en-GB', {
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      })}`;
-    }
-
-    // Build sources list
-    renderSourcesList(latest.by_publication);
-
-    // Event listeners for controls
-    const selectAllBtn = document.getElementById('selectAllSources');
-    const deselectAllBtn = document.getElementById('deselectAllSources');
-    const pubSortSelect = document.getElementById('pubSort');
-    const keywordsSentimentSelect = document.getElementById('keywordsSentiment');
-
-    if (selectAllBtn) selectAllBtn.addEventListener('click', selectAllSources);
-    if (deselectAllBtn) deselectAllBtn.addEventListener('click', deselectAllSources);
-    if (pubSortSelect) pubSortSelect.addEventListener('change', updateDashboard);
-    if (keywordsSentimentSelect) keywordsSentimentSelect.addEventListener('change', updateDashboard);
-
-    // Render static charts once
-    if (history?.history) {
-      renderTrendChart(history.history);
-    }
-
-    // Initially select all sources
-    selectAllSources();
-
-    console.log('Dashboard initialized successfully');
-
-    // Add window resize handler to prevent chart issues
-    let resizeTimeout;
-    window.addEventListener('resize', () => {
-      clearTimeout(resizeTimeout);
-      resizeTimeout = setTimeout(() => {
-        // Force canvas elements to respect container constraints
-        document.querySelectorAll('.chart-widget canvas').forEach(canvas => {
-          if (canvas.style.height && parseInt(canvas.style.height) > 300) {
-            canvas.style.height = '280px';
-          }
-        });
-      }, 100);
+      hero.append(band);
     });
+    const meta = Dom.el('p', {
+      class: 'hero-meta mono',
+      text: `Last ${latest.window_hours || 24} hours · ${Score.formatCount(outlets)} outlets · updated ${parts.time} ${parts.tz} · refreshes every 30 min`,
+    });
+    return Dom.el('div', {}, [hero, Dom.el('div', { class: 'wrap' }, [meta])]);
+  }
 
-  } catch (err) {
-    console.error('Dashboard initialization failed:', err);
+  sides(totals, goodStories, badStories) {
+    return Dom.el('section', { 'aria-labelledby': 'sides-title' }, [
+      Dom.el('div', { class: 'section-head' }, [
+        Dom.el('h2', { id: 'sides-title', text: "Today's two sides" }),
+        Dom.el('p', { class: 'muted', text: 'The latest headlines pulling each way. Tap a card to read the story at the source.' }),
+      ]),
+      Dom.el('div', { class: 'sides', style: 'margin-top: 24px' }, [
+        this.column('good', totals.positive, goodStories),
+        this.column('bad', totals.negative, badStories),
+      ]),
+    ]);
+  }
 
-    const generatedAtEl = document.getElementById('generatedAt');
-    if (generatedAtEl) {
-      generatedAtEl.textContent = `Error: ${err.message}`;
+  column(side, count, stories) {
+    const label = side === 'good' ? 'Good' : 'Bad';
+    return Dom.el('div', { class: 'side' }, [
+      Dom.el('div', { class: 'side-kicker' }, [
+        Dom.el('span', { class: `pill pill-${side}`, text: label }),
+        Dom.el('span', { class: 'muted small', text: `${Score.formatCount(count)} ${label.toLowerCase()} headlines · newest first` }),
+      ]),
+      Dom.el('div', { class: 'stories' }, stories.length
+        ? stories.map((story) => this.storyCard(story, side))
+        : [Dom.el('p', { class: 'muted', text: `No ${label.toLowerCase()} headlines in this window.` })]),
+      Dom.el('a', { class: 'text-link', href: `headlines.html?sentiment=${side}`, text: `See all ${label.toLowerCase()} headlines →` }),
+    ]);
+  }
+
+  storyCard(story, side) {
+    const bits = [
+      story.source,
+      Score.relativeTime(story.published),
+      story.region,
+      story.topic,
+    ].filter(Boolean);
+    return Dom.el('a', {
+      class: `story story-${side}`,
+      href: story.url || '#',
+      target: '_blank',
+      rel: 'noopener noreferrer',
+      'aria-label': `${story.title}. ${story.source || 'Unknown source'}. Read at source.`,
+    }, [
+      Dom.el('span', { class: `pill pill-${side}`, text: side === 'good' ? 'Good' : 'Bad' }),
+      Dom.el('span', { class: 'story-title', text: story.title }),
+      Dom.el('p', { class: 'story-meta', text: bits.join(' · ') }),
+      Dom.el('span', { class: 'story-read', text: 'Read →' }),
+    ]);
+  }
+
+  week(history, generatedAt) {
+    const days = history.history || [];
+    const sum = Score.sumDays(days);
+    const total = sum.positive + sum.neutral + sum.negative;
+    const max = Math.max(1, ...days.map((day) => day.positive + day.neutral + day.negative));
+    return Dom.el('section', { id: 'week', 'aria-labelledby': 'week-title' }, [
+      Dom.el('div', { class: 'section-head' }, [
+        Dom.el('h2', { id: 'week-title', text: 'This week' }),
+        Dom.el('p', { class: 'muted', text: "Share of each day's headlines, good on top, bad underneath. Net = good − bad in points. Today is still filling up." }),
+      ]),
+      Dom.el('div', { class: 'week-layout', style: 'margin-top: 24px' }, [
+        Dom.el('div', {}, [
+          Dom.el('div', { class: 'days', role: 'list' }, days.map((day) => this.dayColumn(day, generatedAt, max))),
+          Dom.el('div', { class: 'legend' }, [
+            Dom.el('span', {}, [Dom.el('i', { class: 'swatch good' }), 'Good']),
+            Dom.el('span', {}, [Dom.el('i', { class: 'swatch neutral' }), 'Neutral']),
+            Dom.el('span', {}, [Dom.el('i', { class: 'swatch' }), 'Bad']),
+            Dom.el('span', {}, [Dom.el('i', { class: 'swatch partial' }), 'today so far']),
+          ]),
+        ]),
+        Dom.el('div', { class: 'week-cards' }, [
+          this.stat('good', `Good · ${days.length} days`, Score.formatPercent(sum.positive, total)),
+          this.stat('bad', `Bad · ${days.length} days`, Score.formatPercent(sum.negative, total)),
+          this.stat('neutral', `Neutral · ${days.length} days`, Score.formatPercent(sum.neutral, total)),
+          Dom.el('div', { class: 'stat stat-count' }, [
+            Dom.el('b', { class: 'num', text: Score.formatCount(total) }),
+            Dom.el('p', { text: 'headlines' }),
+            Dom.el('p', { class: 'muted', text: Score.weekRecord(days) }),
+          ]),
+        ]),
+      ]),
+    ]);
+  }
+
+  dayColumn(day, generatedAt, max) {
+    const count = day.positive + day.neutral + day.negative;
+    const net = Score.dayNet(day.positive, day.negative, day.neutral);
+    const partial = Score.isPartialDay(day.date, generatedAt);
+    const height = Math.max(8, Math.round((count / max) * 132));
+    const bar = Dom.el('div', { class: 'day-bar', style: `height:${height}px` });
+    if (count) {
+      bar.append(
+        Dom.el('i', { class: 'seg-good', style: `flex:${day.positive} 1 0` }),
+        Dom.el('i', { class: 'seg-neutral', style: `flex:${day.neutral} 1 0` }),
+        Dom.el('i', { class: 'seg-bad', style: `flex:${day.negative} 1 0` }),
+      );
     }
+    const sign = net > 0 ? `+${net}` : String(net);
+    return Dom.el('div', { class: `day${partial ? ' is-partial' : ''}`, role: 'listitem' }, [
+      Dom.el('span', { class: `day-net num ${net > 0 ? 'pos' : net < 0 ? 'neg' : ''}`, text: sign }),
+      bar,
+      Dom.el('span', { class: 'day-label', text: `${Score.dayLabel(day.date)}${partial ? '*' : ''}` }),
+      Dom.el('span', { class: 'day-count num', text: Score.formatCount(count) }),
+    ]);
+  }
 
-    // Show fallback content
-    updateStats({ positive: 0, neutral: 0, negative: 0 });
+  stat(kind, label, value) {
+    return Dom.el('div', { class: `stat stat-${kind}` }, [
+      Dom.el('p', { class: 'caps', text: label }),
+      Dom.el('b', { class: 'num', text: value }),
+    ]);
+  }
+
+  where(latest) {
+    const regions = [...(latest.by_region || [])].sort((a, b) => b.count - a.count);
+    const topics = [...(latest.by_topic || [])].sort((a, b) => b.count - a.count);
+    return Dom.el('section', { id: 'where', 'aria-labelledby': 'where-title' }, [
+      Dom.el('div', { class: 'section-head' }, [
+        Dom.el('h2', { id: 'where-title', text: "Who's winning where" }),
+        Dom.el('p', { class: 'muted', text: 'Each bar is one region or topic over the last 24 hours. A tie is under 2 points. Smaller samples are faded.' }),
+      ]),
+      Dom.el('div', { class: 'where-grid', style: 'margin-top: 8px' }, [
+        this.meterGroup('By region', regions, 'region'),
+        this.meterGroup('By topic', topics, 'topic'),
+      ]),
+    ]);
+  }
+
+  meterGroup(title, rows, key) {
+    return Dom.el('div', {}, [
+      Dom.el('h3', { text: title }),
+      Dom.el('div', { class: 'meter-list' }, rows.map((row) => this.meter(row[key], row))),
+    ]);
+  }
+
+  meter(name, row) {
+    const result = Score.meter(row.positive, row.negative, row.neutral, row.count);
+    const sample = result.faded ? ' · short sample' : '';
+    return Dom.el('div', { class: `meter${result.faded ? ' is-short' : ''}` }, [
+      Dom.el('div', { class: 'meter-top' }, [
+        Dom.el('span', { class: 'meter-name', text: name }),
+        Dom.el('span', { class: 'meter-n', text: `${Score.formatCount(row.count)} headlines${sample}` }),
+        Dom.el('span', { class: `meter-result num ${result.side}`, text: result.label }),
+      ]),
+      Dom.el('div', { class: 'meter-track' }, [
+        Dom.el('span', { class: `meter-fill ${result.side === 'good' ? 'good' : 'bad'}`, style: `width:${result.width}%` }),
+      ]),
+    ]);
+  }
+
+  shareSection() {
+    return Dom.el('section', { class: 'share', id: 'share', 'aria-labelledby': 'share-title' }, [
+      Dom.el('div', {}, [
+        Dom.el('h2', { id: 'share-title', text: "Share today's score" }),
+        Dom.el('p', { text: "A ready-made card of today's tug of war (1200×630 for X, LinkedIn and link previews)." }),
+      ]),
+      Dom.el('div', { class: 'share-actions' }, [
+        Dom.el('button', { class: 'btn btn-dark', type: 'button', id: 'download-card', text: 'Download image' }),
+        Dom.el('button', { class: 'btn btn-ghost', type: 'button', id: 'copy-link', text: 'Copy link' }),
+      ]),
+    ]);
+  }
+
+  bindShare() {
+    document.getElementById('download-card')?.addEventListener('click', () => this.downloadCard());
+    document.getElementById('copy-link')?.addEventListener('click', (event) => this.copyLink(event.currentTarget));
+  }
+
+  async copyLink(button) {
+    const url = new URL(window.location.href);
+    url.hash = '';
+    url.search = '';
+    try {
+      await navigator.clipboard.writeText(url.toString());
+    } catch (error) {
+      const input = Dom.el('textarea', { text: url.toString() });
+      document.body.append(input);
+      input.select();
+      document.execCommand('copy');
+      input.remove();
+    }
+    const previous = button.textContent;
+    button.textContent = 'Copied';
+    window.setTimeout(() => { button.textContent = previous; }, 1600);
+  }
+
+  async downloadCard() {
+    if (!this.score) return;
+    await document.fonts.ready;
+    const { totals, total, outlets, latest } = this.score;
+    const width = 1200;
+    const height = 630;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    const goodW = (totals.positive / total) * width;
+    const neutralW = (totals.neutral / total) * width;
+    ctx.fillStyle = '#FFD43B';
+    ctx.fillRect(0, 0, goodW, height);
+    ctx.fillStyle = '#C9C3B4';
+    ctx.fillRect(goodW, 0, neutralW, height);
+    ctx.fillStyle = '#16161D';
+    ctx.fillRect(goodW + neutralW, 0, width - goodW - neutralW, height);
+    const result = Score.winner(totals.positive, totals.negative, totals.neutral);
+    ctx.fillStyle = '#16161D';
+    ctx.font = '700 28px "Space Grotesk", sans-serif';
+    ctx.fillText('GOOD NEWS', 48, 80);
+    ctx.font = '700 92px "Space Grotesk", sans-serif';
+    ctx.fillText(Score.formatPercent(totals.positive, total), 48, 230);
+    ctx.font = '500 24px Inter, sans-serif';
+    ctx.fillText(`${Score.formatCount(totals.positive)} good headlines`, 48, 280);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '700 28px "Space Grotesk", sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText('BAD NEWS', width - 48, 80);
+    ctx.font = '700 92px "Space Grotesk", sans-serif';
+    ctx.fillText(Score.formatPercent(totals.negative, total), width - 48, 230);
+    ctx.font = '500 24px Inter, sans-serif';
+    ctx.fillText(`${Score.formatCount(totals.negative)} bad headlines`, width - 48, 280);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#16161D';
+    ctx.font = '700 22px "Space Grotesk", sans-serif';
+    ctx.fillText(Score.formatPercent(totals.neutral, total), goodW + neutralW / 2, height / 2);
+    ctx.font = '700 18px "Space Grotesk", sans-serif';
+    const pill = `${result.long} · ${Score.formatCount(total)} headlines · ${outlets} outlets`;
+    ctx.fillStyle = '#16161D';
+    const pillW = Math.min(width - 80, ctx.measureText(pill).width + 48);
+    ctx.fillRect((width - pillW) / 2, height - 120, pillW, 48);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillText(pill, width / 2, height - 90);
+    ctx.font = '500 18px "IBM Plex Mono", monospace';
+    ctx.fillText('goodnewsbadnews.xyz', width / 2, height - 36);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    const link = Dom.el('a', { href: URL.createObjectURL(blob), download: 'goodnewsbadnews-today.png' });
+    link.click();
+    URL.revokeObjectURL(link.href);
+    void latest;
   }
 }
 
-// Kick off when DOM content is ready
-document.addEventListener('DOMContentLoaded', init);
+const root = document.getElementById('main');
+if (root && document.body.dataset.page === 'dashboard') {
+  new Dashboard(root).start();
+}
