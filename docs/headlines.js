@@ -1,4 +1,4 @@
-import { Dom, Feed, Score } from './score.js?v=4';
+import { Dom, Feed, Score } from './score.js?v=5';
 
 const SEARCH_ICON = '<circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>';
 const CHEVRON = '<path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
@@ -472,7 +472,21 @@ class HeadlinesPage {
 
   row(item) {
     const side = Score.sentimentKey(item.sentiment);
-    const meta = [item.source, item.region, item.topic, Score.formatScore(item.score)].filter(Boolean).join(' · ');
+    const meta = [item.source, item.region, item.topic].filter(Boolean).join(' · ');
+    const formatted = Score.formatScore(item.score);
+    const when = [
+      Dom.el('time', { datetime: item.published || '', text: Score.clock(item.published) }),
+    ];
+    if (formatted) {
+      when.push(Dom.el('span', {
+        class: 'hline-score',
+        'aria-label': `score ${formatted}`,
+        title: 'How we score: the title and RSS summary. See How the score works at the bottom of this page.',
+      }, [
+        Dom.el('span', { class: 'hline-score-label', text: 'score ' }),
+        formatted,
+      ]));
+    }
     return Dom.el('a', {
       class: 'hline',
       href: item.url || '#',
@@ -484,7 +498,7 @@ class HeadlinesPage {
         Dom.el('span', { class: 'hline-title', text: item.title }),
         Dom.el('span', { class: 'hline-meta', text: meta }),
       ]),
-      Dom.el('time', { datetime: item.published || '', text: Score.clock(item.published) }),
+      Dom.el('span', { class: 'hline-when' }, when),
     ]);
   }
 
@@ -496,7 +510,7 @@ class HeadlinesPage {
       this.glanceCard('neutral', 'Neutral', totals.neutral, total),
       Dom.el('div', { class: 'score-note' }, [
         Dom.el('h2', { class: 'h3', text: 'How we score' }),
-        Dom.el('p', { text: 'Each headline is run through VADER sentiment. ≥ 0.05 = good, ≤ −0.05 = bad. It reads headlines only, so it makes mistakes — nobody edits the results.' }),
+        Dom.el('p', { text: 'The title and RSS summary go through VADER. vader is that raw compound, from −1 to +1. Keyword patterns then add or subtract 0.1, and the score on the row is that adjusted value clamped to −1…+1. ≥ 0.05 = good, ≤ −0.05 = bad. It still makes mistakes — nobody edits the results.' }),
         Dom.el('p', {}, [
           Dom.el('a', {
             href: 'https://github.com/psychevibes/GoodNewsBadNews/issues/new?title=Misread%20headline&body=Paste%20the%20headline%20and%20what%20the%20score%20got%20wrong.',

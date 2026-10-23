@@ -72,6 +72,26 @@ def test_region_fallback():
     assert 'Brazil News' in Regions.UNCERTAIN
     assert Regions.for_source('Fox News') == 'North America'
     assert Regions.for_source('Independent') == 'Europe'
+    assert Regions.for_source('BBC News') == 'Europe'
+    assert Regions.for_source('BBC Sport') == 'Europe'
+    assert Regions.for_source('Sky Sports') == 'Europe'
+    assert Regions.for_source('Sky News') == 'Europe'
+    assert Regions.for_source('Telegraph') == 'Europe'
+    assert Regions.for_source('Reuters') == 'Europe'
+    assert Regions.for_source('Bloomberg') == 'North America'
+    assert Regions.for_source('CNBC') == 'North America'
+    assert Regions.for_source('MarketWatch') == 'North America'
+    assert Regions.for_source('Forbes') == 'North America'
+    assert Regions.for_source('TechCrunch') == 'North America'
+    assert Regions.for_source('The Verge') == 'North America'
+    assert Regions.for_source('Wired') == 'North America'
+    assert Regions.for_source('Ars Technica') == 'North America'
+    assert Regions.for_source('Engadget') == 'North America'
+    assert Regions.for_source('Mashable') == 'North America'
+    assert Regions.for_source('ESPN') == 'North America'
+    assert Regions.for_source('Sports Illustrated') == 'North America'
+    global_outlets = [name for name, region in Regions.OUTLETS.items() if region == Regions.FALLBACK]
+    assert global_outlets == ['Brazil News']
     for feed in FEEDS:
         assert feed['name'] in Regions.OUTLETS, feed['name']
         assert feed['name'] in Dates.ZONES, feed['name']
@@ -92,6 +112,10 @@ def test_dates_day_month_and_utc():
     assert Dates.iso('2027-01-09T16:08:00+00:00', 'Independent', now=NOW) is None
     assert Dates.iso('Saturday 09 January 2027 16:08 GMT', 'Independent', now=NOW) is None
     assert Dates.now_iso(NOW) == '2026-10-23T12:00:00+00:00'
+    assert Dates.next_run_iso(NOW) == '2026-10-23T12:30:00+00:00'
+    half = datetime(2026, 10, 23, 12, 30, tzinfo=timezone.utc)
+    assert Dates.next_run_iso(half) == '2026-10-23T13:00:00+00:00'
+    assert Dates.next_run_iso(datetime(2026, 10, 23, 12, 45, 10, tzinfo=timezone.utc)) == '2026-10-23T13:00:00+00:00'
 
 
 def test_sentiment_thresholds():
@@ -101,6 +125,43 @@ def test_sentiment_thresholds():
     assert Sentiment.label(-0.049) == 'neutral'
     assert Sentiment.rounded(0.0281, 'neutral') == 0.028
     assert Sentiment.rounded(0.04979999999999998, 'neutral') == 0.049
+    assert Sentiment.label(1.189) == 'positive'
+    assert Sentiment.label(-1.292) == 'negative'
+    assert Sentiment.publish(1.189, 'positive') == 1.0
+    assert Sentiment.publish(-1.292, 'negative') == -1.0
+    assert Sentiment.publish(-1.065, 'negative') == -1.0
+    assert Sentiment.publish(0.784, 'positive') == 0.784
+    assert Sentiment.publish(0.04979999999999998, 'neutral') == 0.049
+    assert Sentiment.vader(0.7844) == 0.784
+    assert Sentiment.vader(1.2) == 1.0
+    assert Sentiment.vader(-1.4) == -1.0
+    assert -1.0 <= Sentiment.publish(1.189, 'positive') <= 1.0
+
+
+def test_prepare_clamps_score_and_keeps_label():
+    stats = {
+        'seen': set(), 'unparsed': 0, 'future': 0, 'dates_rewritten': 0,
+        'unparsed_examples': [], 'future_examples': [],
+    }
+    ready = Headlines.prepare({
+        'title': 'City orders a full lockdown after the attack',
+        'url': 'https://example.com/lockdown',
+        'source': 'NBC News',
+        'published': '2026-10-23T08:47:16+00:00',
+        'sentiment': 'negative',
+        'sentiment_score': -1.065,
+        'summary': 'A crisis and a disaster.',
+    }, NOW, stats)
+    assert ready['sentiment'] == 'negative'
+    assert ready['score'] == -1.0
+    assert -1.0 <= ready['vader'] <= 1.0
+    assert ready['region'] == 'North America'
+    assert ready['id']
+    row = Headlines.public(ready, include_topic=True)
+    assert row['id'] == ready['id']
+    assert row['vader'] == ready['vader']
+    assert row['score'] == -1.0
+    assert 'sentiment_score' not in row
 
 
 if __name__ == '__main__':

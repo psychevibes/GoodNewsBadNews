@@ -27,13 +27,15 @@ export class Score {
     return (Math.round((value + Number.EPSILON) * 10) / 10).toFixed(1);
   }
 
-  /** VADER compound, three decimal places, for the headline meta line. */
+  /** Adjusted score on [-1, 1], two decimals, with a sign. Minus is U+2212. */
   static formatScore(value) {
     const number = Number(value);
     if (!Number.isFinite(number)) return '';
-    const text = number.toFixed(3);
-    if (text === '-0.000') return '0.000';
-    return text.replace('-', '\u2212');
+    const clamped = Math.max(-1, Math.min(1, number));
+    const abs = Math.abs(clamped).toFixed(2);
+    if (clamped > 0) return `+${abs}`;
+    if (clamped < 0) return `\u2212${abs}`;
+    return '0.00';
   }
 
   static formatPercent(count, total) {

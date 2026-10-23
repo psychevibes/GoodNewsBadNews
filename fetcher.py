@@ -254,15 +254,36 @@ class Sentiment:
             return -0.049
         return score
 
+    @staticmethod
+    def vader(compound):
+        """Raw VADER compound, already on −1..1, at three decimal places."""
+        return max(-1.0, min(1.0, round(float(compound), 3)))
+
+    @staticmethod
+    def publish(adjusted, label=None):
+        """Keyword-adjusted compound, clamped to [-1, 1] after the label is chosen."""
+        return max(-1.0, min(1.0, Sentiment.rounded(adjusted, label)))
+
+    @staticmethod
+    def scored_text(title, summary=''):
+        return f"{title}. {summary}"
+
+    @staticmethod
+    def backfill_vader(title, summary=''):
+        """Compound for a stored row. Fetch passes the joined text in as the title."""
+        joined = Sentiment.scored_text(title or '', summary or '')
+        raw = sia.polarity_scores(Sentiment.scored_text(joined)).get('compound', 0.0)
+        return Sentiment.vader(raw)
+
 
 class Regions:
     """One outlet -> region map. Unknown outlets are Global."""
 
     FALLBACK = 'Global'
     OUTLETS = {
-        'BBC News': 'Global',
+        'BBC News': 'Europe',
         'CNN': 'North America',
-        'Reuters': 'Global',
+        'Reuters': 'Europe',
         'AP News': 'North America',
         'NPR': 'North America',
         'CBS News': 'North America',
@@ -307,20 +328,20 @@ class Regions:
         'Daily Nation Kenya': 'Africa',
         'Buenos Aires Herald': 'South America',
         'Brazil News': 'Global',
-        'CNBC': 'Global',
-        'Bloomberg': 'Global',
-        'MarketWatch': 'Global',
-        'Forbes': 'Global',
-        'TechCrunch': 'Global',
-        'The Verge': 'Global',
-        'Wired': 'Global',
-        'Ars Technica': 'Global',
-        'Engadget': 'Global',
-        'Mashable': 'Global',
-        'ESPN': 'Global',
-        'Sports Illustrated': 'Global',
-        'BBC Sport': 'Global',
-        'Sky Sports': 'Global',
+        'CNBC': 'North America',
+        'Bloomberg': 'North America',
+        'MarketWatch': 'North America',
+        'Forbes': 'North America',
+        'TechCrunch': 'North America',
+        'The Verge': 'North America',
+        'Wired': 'North America',
+        'Ars Technica': 'North America',
+        'Engadget': 'North America',
+        'Mashable': 'North America',
+        'ESPN': 'North America',
+        'Sports Illustrated': 'North America',
+        'BBC Sport': 'Europe',
+        'Sky Sports': 'Europe',
     }
     # Named here so a run reports them instead of silently guessing.
     UNCERTAIN = {
@@ -460,6 +481,16 @@ class Dates:
         return Dates.to_iso(now or datetime.now(timezone.utc))
 
     @staticmethod
+    def next_run_iso(now=None):
+        """Next UTC :00 or :30 strictly after now. The fetch cron is every 30 minutes."""
+        utc = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).replace(microsecond=0)
+        minute = 0 if utc.minute < 30 else 30
+        slot = utc.replace(minute=minute, second=0)
+        if slot <= utc:
+            slot += timedelta(minutes=30)
+        return Dates.to_iso(slot)
+
+    @staticmethod
     def _parse_string(text, day_first):
         text = str(text).strip()
         if not text:
@@ -589,14 +620,25 @@ class Headlines:
         prepared['region'] = Regions.for_source(source)
         if prepared['published'] != (article.get('published') or ''):
             stats['dates_rewritten'] += 1
-        compound = prepared.get('sentiment_score', prepared.get('score'))
-        if compound is not None:
-            prepared['score'] = Sentiment.rounded(compound, prepared.get('sentiment'))
+        label = prepared.get('sentiment')
+        adjusted = prepared.get('sentiment_score')
+        if adjusted is None:
+            adjusted = prepared.get('score')
+        if adjusted is not None:
+            prepared['score'] = Sentiment.publish(adjusted, label)
+        if prepared.get('vader') is None:
+            prepared['vader'] = Sentiment.backfill_vader(prepared.get('title'), prepared.get('summary'))
+            stats['vader_filled'] = stats.get('vader_filled', 0) + 1
+        else:
+            prepared['vader'] = Sentiment.vader(prepared['vader'])
+        if not prepared.get('id'):
+            prepared['id'] = generate_article_id(prepared.get('title') or '', prepared.get('url') or '')
         return prepared
 
     @staticmethod
     def public(article, include_topic=False):
         row = {
+            'id': article.get('id') or generate_article_id(article.get('title') or '', article.get('url') or ''),
             'title': article['title'],
             'url': article['url'],
             'source': article['source'],
@@ -604,6 +646,8 @@ class Headlines:
             'published': article['published'],
             'sentiment': article['sentiment'],
         }
+        if article.get('vader') is not None:
+            row['vader'] = article['vader']
         if article.get('score') is not None:
             row['score'] = article['score']
         if include_topic:
@@ -616,13 +660,14 @@ class Headlines:
 
 def classify_sentiment_enhanced(title: str, summary: str = "") -> dict:
     """Enhanced sentiment classification with context awareness"""
-    full_text = f"{title}. {summary}"
+    full_text = Sentiment.scored_text(title, summary)
     
     # Get VADER scores
     scores = sia.polarity_scores(full_text)
-    compound = scores.get('compound', 0.0)
+    raw = scores.get('compound', 0.0)
+    compound = raw
     
-    # Context-aware adjustments
+    # Context-aware adjustments. The label uses this unclamped value.
     text_lower = full_text.lower()
     
     # Boost positive sentiment for certain contexts
@@ -651,7 +696,8 @@ def classify_sentiment_enhanced(title: str, summary: str = "") -> dict:
     return {
         'label': label,
         'compound': compound,
-        'score': Sentiment.rounded(compound, label),
+        'vader': Sentiment.vader(raw),
+        'score': Sentiment.publish(compound, label),
         'scores': scores
     }
 
@@ -731,6 +777,7 @@ def fetch_rss_feeds():
                     'published': entry_published(entry),
                     'sentiment': sentiment['label'],
                     'sentiment_score': sentiment['compound'],
+                    'vader': sentiment['vader'],
                     'score': sentiment['score'],
                     'topic': topic,
                     'summary': summary
@@ -916,6 +963,7 @@ def main():
         
         stats = {
             'seen': set(), 'future': 0, 'unparsed': 0, 'dates_rewritten': 0,
+            'vader_filled': 0,
             'future_examples': [], 'unparsed_examples': [],
         }
         prepared = []
@@ -928,6 +976,7 @@ def main():
         print(f"📊 Prepared {len(prepared)}; removed {removed} duplicates")
         print(f"🗓️  Dropped {stats['future']} future dates and {stats['unparsed']} unparsed dates")
         print(f"🕒 Rewrote {stats['dates_rewritten']} timestamps to UTC")
+        print(f"📉 Filled raw VADER on {stats['vader_filled']} stored rows")
         for source, published, title in stats['future_examples']:
             print(f"   future dropped: {source} {published} {title}")
         for source, published, title in stats['unparsed_examples']:
@@ -956,6 +1005,8 @@ def main():
         
         latest_output = {
             'generated_at': generated_at,
+            'fetched_at': generated_at,
+            'next_run_at': Dates.next_run_iso(now),
             'window_hours': 24,
             **latest_stats
         }
