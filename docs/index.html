@@ -1,144 +1,71 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>News Sentiment Dashboard</title>
-  <!-- Load a modern Google font -->
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Good News Bad News</title>
+  <meta name="description" content="A daily tug of war between good and bad headlines, scored from RSS and updated every 30 minutes." />
+  <meta name="theme-color" content="#FFFDF6" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='16' height='32' fill='%23FFD43B'/%3E%3Crect x='16' width='16' height='32' fill='%2316161D'/%3E%3C/svg%3E" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <!-- Local stylesheet for layout and dark theme -->
-  <link rel="stylesheet" href="styles.css?v=2" />
-  <!-- Chart.js from CDN - Fixed integrity hash -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" crossorigin="anonymous"
-    defer></script>
-  <!-- Main application script -->
-  <script src="app.js" defer></script>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=3" />
+  <script type="module" src="app.js?v=3"></script>
 </head>
-
-<body>
-  <!-- Background gradients -->
-  <div class="bg-gradient"></div>
-  <div class="bg-gradient-2"></div>
-
-  <div class="dashboard">
-    <!-- Sidebar for source filters -->
-    <aside class="sidebar">
-      <h2>Sources</h2>
-      <div class="source-controls">
-        <button id="selectAllSources" class="btn small">All</button>
-        <button id="deselectAllSources" class="btn small">None</button>
+<body data-page="dashboard">
+  <a class="skip" href="#main">Skip to the score</a>
+  <header class="site-header">
+    <div class="wrap header-bar">
+      <a class="logo" href="index.html" aria-label="Good News Bad News, home">
+        <span class="logo-good">Good news</span>
+        <span class="logo-bad">Bad news</span>
+      </a>
+      <nav class="nav" aria-label="Sections">
+        <a href="#today" aria-current="page">Today</a>
+        <a href="#week"><span class="nav-long">This week</span><span class="nav-short">Week</span></a>
+        <a class="nav-wide" href="#where">Who's winning where</a>
+        <a href="headlines.html"><span class="nav-long">All headlines</span><span class="nav-short">Headlines</span></a>
+      </nav>
+      <a class="btn btn-dark header-share" href="#share">Share today</a>
+    </div>
+    <div class="wrap header-score">
+      <p class="winner" id="winner" hidden></p>
+    </div>
+  </header>
+  <main id="main" aria-live="polite"></main>
+  <footer class="site-footer" id="score">
+    <div class="wrap footer-grid">
+      <div>
+        <a class="logo" href="index.html" aria-label="Good News Bad News">
+          <span class="logo-good">Good news</span>
+          <span class="logo-bad">Bad news</span>
+        </a>
+        <h2 style="margin-top: 24px">How the score works</h2>
+        <p>Every headline from <span data-feed-count>the</span> RSS feeds is scored with VADER, a lexicon-based sentiment model: compound ≥ 0.05 counts as good, ≤ −0.05 as bad, anything between is neutral. We score headlines only — not article text — so sarcasm and context can fool it.</p>
       </div>
-      <div id="sourcesList" class="sources-list"></div>
-    </aside>
-    <!-- Main content area -->
-    <main class="main">
-      <header class="main-header">
-        <div class="header-left">
-          <h1 class="page-title">goodnewsbadnews.xyz</h1>
-          <p class="page-subtitle">
-            Global News Sentiment Analysis
-          </p>
-        </div>
-        <div class="header-right">
-          <span id="generatedAt" class="status-text">Loading data...</span>
-          <a href="headlines.html" class="header-btn">
-            <span>📰</span> View All Headlines
-          </a>
-        </div>
-      </header>
-      <!-- Summary statistics -->
-      <div class="stats-grid">
-        <div class="stat-card" id="totalStat">
-          <p class="stat-title">Total Articles</p>
-          <span class="stat-value" id="totalCount">0</span>
-        </div>
-        <div class="stat-card positive" id="positiveStat">
-          <p class="stat-title">Positive</p>
-          <span class="stat-value" id="positiveCount">0</span>
-        </div>
-        <div class="stat-card neutral" id="neutralStat">
-          <p class="stat-title">Neutral</p>
-          <span class="stat-value" id="neutralCount">0</span>
-        </div>
-        <div class="stat-card negative" id="negativeStat">
-          <p class="stat-title">Negative</p>
-          <span class="stat-value" id="negativeCount">0</span>
-        </div>
+      <div>
+        <h2>Freshness</h2>
+        <p>Data generated <time data-generated datetime="">—</time></p>
+        <p>Feeds refresh every 30 min (GitHub Actions)</p>
+        <p>Window: rolling last 24 hours</p>
       </div>
-      <!-- Charts and widgets -->
-      <div class="widgets-grid">
-        <!-- Sentiment distribution -->
-        <div class="chart-widget">
-          <div class="widget-title">
-            Sentiment Distribution
-          </div>
-          <canvas id="overallChart"></canvas>
-        </div>
-        <!-- 7‑day trend -->
-        <div class="chart-widget">
-          <div class="widget-title">
-            7‑Day Trend
-          </div>
-          <canvas id="trendChart"></canvas>
-        </div>
-        <!-- Regional sentiment -->
-        <div class="chart-widget">
-          <div class="widget-title">
-            Regional Sentiment
-          </div>
-          <canvas id="regionChart"></canvas>
-        </div>
-        <!-- By publication -->
-        <div class="chart-widget">
-          <div class="widget-title">
-            By Publication
-            <label for="pubSort" class="sr-only">Sort by</label>
-            <select id="pubSort" class="dropdown">
-              <option value="count" selected>Total Articles</option>
-              <option value="positive">Most Positive</option>
-              <option value="neutral">Most Neutral</option>
-              <option value="negative">Most Negative</option>
-            </select>
-          </div>
-          <canvas id="pubChart"></canvas>
-        </div>
-        <!-- By topic -->
-        <div class="chart-widget">
-          <div class="widget-title">
-            By Topic
-          </div>
-          <canvas id="topicChart"></canvas>
-        </div>
-        <!-- Trending keywords -->
-        <div class="chart-widget">
-          <div class="widget-title">
-            Trending Keywords
-            <label for="keywordsSentiment" class="sr-only">Filter by sentiment</label>
-            <select id="keywordsSentiment" class="dropdown">
-              <option value="all" selected>All Sentiments</option>
-              <option value="positive">Positive Only</option>
-              <option value="negative">Negative Only</option>
-            </select>
-          </div>
-          <canvas id="keywordsChart"></canvas>
-        </div>
+      <div>
+        <h2>More</h2>
+        <ul>
+          <li><a href="#score">How the score works</a></li>
+          <li><a href="data/latest.json" download="latest.json">Download today's data (JSON)</a></li>
+          <li><a href="https://github.com/psychevibes/GoodNewsBadNews">Source code on GitHub</a></li>
+          <li><a href="https://github.com/psychevibes/GoodNewsBadNews/issues/new?title=Misread%20headline&amp;body=Paste%20the%20headline%20and%20what%20the%20score%20got%20wrong.">Report a misread headline</a></li>
+        </ul>
       </div>
-      <!-- Latest headlines -->
-      <div class="headlines-widget">
-        <div class="widget-title">
-          Latest Headlines
-          <p id="headlinesCount" class="headline-count">0 articles</p>
-        </div>
-        <ul id="headlines" class="headlines-list"></ul>
-        <div style="text-align: center; margin-top: 24px;">
-          <a href="headlines.html" class="view-all-btn">View All Headlines →</a>
-        </div>
-      </div>
-    </main>
-  </div>
+    </div>
+    <div class="wrap">
+      <p class="footer-note">Good News Bad News is an experiment in measuring the mood of the news. Scores are automated and imperfect; we never edit or remove headlines.</p>
+    </div>
+  </footer>
+  <noscript>
+    <p class="wrap">This page needs JavaScript to load the score from the JSON files.</p>
+  </noscript>
 </body>
-
 </html>
