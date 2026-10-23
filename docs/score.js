@@ -27,6 +27,15 @@ export class Score {
     return (Math.round((value + Number.EPSILON) * 10) / 10).toFixed(1);
   }
 
+  /** VADER compound, three decimal places, for the headline meta line. */
+  static formatScore(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return '';
+    const text = number.toFixed(3);
+    if (text === '-0.000') return '0.000';
+    return text.replace('-', '\u2212');
+  }
+
   static formatPercent(count, total) {
     if (!total) return '0.0%';
     return `${this.format1((count / total) * 100)}%`;

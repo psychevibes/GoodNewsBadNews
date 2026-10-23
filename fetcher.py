@@ -5,7 +5,10 @@ import hashlib
 import re
 import socket
 import traceback
+import unicodedata
 from datetime import datetime, timedelta, timezone
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from zoneinfo import ZoneInfo
 import nltk
 
 import feedparser
@@ -24,7 +27,7 @@ try:
             nltk.data.path.append(nltk_data_path)
         print(f"Using NLTK data path: {nltk_data_path}")
     
-    nltk.data.find('vader_lexicon')
+    nltk.data.find('sentiment/vader_lexicon.zip')
 except LookupError:
     print("Downloading vader_lexicon...")
     nltk.download('vader_lexicon', download_dir=os.environ.get('NLTK_DATA'))
@@ -43,79 +46,79 @@ MAX_ARTICLES = 100000  # Limit to ~75MB to stay under GitHub's 100MB limit
 # RSS feeds organized by region (same as before)
 FEEDS = [
     # North America
-    {"name": "BBC News", "url": "http://feeds.bbci.co.uk/news/rss.xml", "region": "Global"},
-    {"name": "CNN", "url": "http://rss.cnn.com/rss/edition.rss", "region": "North America"},
-    {"name": "Reuters", "url": "https://feeds.reuters.com/reuters/topNews", "region": "Global"},
-    {"name": "AP News", "url": "https://feeds.apnews.com/apf-topnews", "region": "North America"},
-    {"name": "NPR", "url": "https://feeds.npr.org/1001/rss.xml", "region": "North America"},
-    {"name": "CBS News", "url": "https://www.cbsnews.com/latest/rss/main", "region": "North America"},
-    {"name": "ABC News", "url": "https://abcnews.go.com/abcnews/topstories", "region": "North America"},
-    {"name": "Fox News", "url": "http://feeds.foxnews.com/foxnews/latest", "region": "North America"},
-    {"name": "NBC News", "url": "http://feeds.nbcnews.com/nbcnews/public/news", "region": "North America"},
-    {"name": "USA Today", "url": "http://rssfeeds.usatoday.com/usatoday-NewsTopStories", "region": "North America"},
-    {"name": "Wall Street Journal", "url": "https://feeds.a.dj.com/rss/RSSWorldNews.xml", "region": "North America"},
-    {"name": "New York Times", "url": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml", "region": "North America"},
-    {"name": "Washington Post", "url": "http://feeds.washingtonpost.com/rss/world", "region": "North America"},
-    {"name": "CBC News", "url": "https://www.cbc.ca/cmlink/rss-world", "region": "North America"},
-    {"name": "Toronto Star", "url": "https://www.thestar.com/feeds.articles.news.world.rss", "region": "North America"},
+    {"name": "BBC News", "url": "http://feeds.bbci.co.uk/news/rss.xml"},
+    {"name": "CNN", "url": "http://rss.cnn.com/rss/edition.rss"},
+    {"name": "Reuters", "url": "https://feeds.reuters.com/reuters/topNews"},
+    {"name": "AP News", "url": "https://feeds.apnews.com/apf-topnews"},
+    {"name": "NPR", "url": "https://feeds.npr.org/1001/rss.xml"},
+    {"name": "CBS News", "url": "https://www.cbsnews.com/latest/rss/main"},
+    {"name": "ABC News", "url": "https://abcnews.go.com/abcnews/topstories"},
+    {"name": "Fox News", "url": "http://feeds.foxnews.com/foxnews/latest"},
+    {"name": "NBC News", "url": "http://feeds.nbcnews.com/nbcnews/public/news"},
+    {"name": "USA Today", "url": "http://rssfeeds.usatoday.com/usatoday-NewsTopStories"},
+    {"name": "Wall Street Journal", "url": "https://feeds.a.dj.com/rss/RSSWorldNews.xml"},
+    {"name": "New York Times", "url": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"},
+    {"name": "Washington Post", "url": "http://feeds.washingtonpost.com/rss/world"},
+    {"name": "CBC News", "url": "https://www.cbc.ca/cmlink/rss-world"},
+    {"name": "Toronto Star", "url": "https://www.thestar.com/feeds.articles.news.world.rss"},
     
     # Europe
-    {"name": "The Guardian", "url": "https://www.theguardian.com/world/rss", "region": "Europe"},
-    {"name": "Financial Times", "url": "https://www.ft.com/?format=rss", "region": "Europe"},
-    {"name": "The Times", "url": "https://www.thetimes.co.uk/rss", "region": "Europe"},
-    {"name": "Independent", "url": "https://www.independent.co.uk/rss", "region": "Europe"},
-    {"name": "Telegraph", "url": "https://www.telegraph.co.uk/rss.xml", "region": "Europe"},
-    {"name": "Sky News", "url": "http://feeds.skynews.com/feeds/rss/world.xml", "region": "Europe"},
-    {"name": "Euronews", "url": "https://www.euronews.com/rss", "region": "Europe"},
-    {"name": "Deutsche Welle", "url": "https://rss.dw.com/xml/rss-en-all", "region": "Europe"},
-    {"name": "France 24", "url": "https://www.france24.com/en/rss", "region": "Europe"},
-    {"name": "RT News", "url": "https://www.rt.com/rss/news/", "region": "Europe"},
-    {"name": "Sputnik News", "url": "https://sputniknews.com/export/rss2/archive/index.xml", "region": "Europe"},
-    {"name": "Irish Times", "url": "https://www.irishtimes.com/cmlink/news-1.1319192", "region": "Europe"},
+    {"name": "The Guardian", "url": "https://www.theguardian.com/world/rss"},
+    {"name": "Financial Times", "url": "https://www.ft.com/?format=rss"},
+    {"name": "The Times", "url": "https://www.thetimes.co.uk/rss"},
+    {"name": "Independent", "url": "https://www.independent.co.uk/rss"},
+    {"name": "Telegraph", "url": "https://www.telegraph.co.uk/rss.xml"},
+    {"name": "Sky News", "url": "http://feeds.skynews.com/feeds/rss/world.xml"},
+    {"name": "Euronews", "url": "https://www.euronews.com/rss"},
+    {"name": "Deutsche Welle", "url": "https://rss.dw.com/xml/rss-en-all"},
+    {"name": "France 24", "url": "https://www.france24.com/en/rss"},
+    {"name": "RT News", "url": "https://www.rt.com/rss/news/"},
+    {"name": "Sputnik News", "url": "https://sputniknews.com/export/rss2/archive/index.xml"},
+    {"name": "Irish Times", "url": "https://www.irishtimes.com/cmlink/news-1.1319192"},
     
     # Asia-Pacific
-    {"name": "Al Jazeera English", "url": "https://www.aljazeera.com/xml/rss/all.xml", "region": "Middle East"},
-    {"name": "South China Morning Post", "url": "https://www.scmp.com/rss/91/feed", "region": "Asia-Pacific"},
-    {"name": "Japan Times", "url": "https://www.japantimes.co.jp/rss/feed/news", "region": "Asia-Pacific"},
-    {"name": "The Hindu", "url": "https://www.thehindu.com/news/national/?service=rss", "region": "Asia-Pacific"},
-    {"name": "Times of India", "url": "https://timesofindia.indiatimes.com/rssfeedstopstories.cms", "region": "Asia-Pacific"},
-    {"name": "Straits Times", "url": "https://www.straitstimes.com/news/singapore/rss.xml", "region": "Asia-Pacific"},
-    {"name": "Australian Broadcasting Corporation", "url": "https://www.abc.net.au/news/feed/51120/rss.xml", "region": "Asia-Pacific"},
-    {"name": "New Zealand Herald", "url": "https://www.nzherald.co.nz/arc/outboundfeeds/rss/section/1/", "region": "Asia-Pacific"},
-    {"name": "Korean Herald", "url": "http://www.koreaherald.com/rss/020701000000.xml", "region": "Asia-Pacific"},
-    {"name": "Channel News Asia", "url": "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml", "region": "Asia-Pacific"},
+    {"name": "Al Jazeera English", "url": "https://www.aljazeera.com/xml/rss/all.xml"},
+    {"name": "South China Morning Post", "url": "https://www.scmp.com/rss/91/feed"},
+    {"name": "Japan Times", "url": "https://www.japantimes.co.jp/rss/feed/news"},
+    {"name": "The Hindu", "url": "https://www.thehindu.com/news/national/?service=rss"},
+    {"name": "Times of India", "url": "https://timesofindia.indiatimes.com/rssfeedstopstories.cms"},
+    {"name": "Straits Times", "url": "https://www.straitstimes.com/news/singapore/rss.xml"},
+    {"name": "Australian Broadcasting Corporation", "url": "https://www.abc.net.au/news/feed/51120/rss.xml"},
+    {"name": "New Zealand Herald", "url": "https://www.nzherald.co.nz/arc/outboundfeeds/rss/section/1/"},
+    {"name": "Korean Herald", "url": "http://www.koreaherald.com/rss/020701000000.xml"},
+    {"name": "Channel News Asia", "url": "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml"},
     
     # Middle East & Africa
-    {"name": "Jerusalem Post", "url": "https://www.jpost.com/rss/rssfeedsheadlines.aspx", "region": "Middle East"},
-    {"name": "Haaretz", "url": "https://www.haaretz.com/srv/haaretz-com-news-feed", "region": "Middle East"},
-    {"name": "Middle East Eye", "url": "https://www.middleeasteye.net/rss", "region": "Middle East"},
-    {"name": "Times of Israel", "url": "https://www.timesofisrael.com/feed/", "region": "Middle East"},
-    {"name": "Daily News Egypt", "url": "https://dailynewsegypt.com/feed/", "region": "Middle East"},
-    {"name": "News24 South Africa", "url": "https://www.news24.com/arc/outboundfeeds/rss/?outputType=xml", "region": "Africa"},
-    {"name": "AllAfrica", "url": "https://allafrica.com/tools/headlines/rdf/latest/headlines.rdf", "region": "Africa"},
-    {"name": "Daily Nation Kenya", "url": "https://nation.africa/kenya/rss", "region": "Africa"},
+    {"name": "Jerusalem Post", "url": "https://www.jpost.com/rss/rssfeedsheadlines.aspx"},
+    {"name": "Haaretz", "url": "https://www.haaretz.com/srv/haaretz-com-news-feed"},
+    {"name": "Middle East Eye", "url": "https://www.middleeasteye.net/rss"},
+    {"name": "Times of Israel", "url": "https://www.timesofisrael.com/feed/"},
+    {"name": "Daily News Egypt", "url": "https://dailynewsegypt.com/feed/"},
+    {"name": "News24 South Africa", "url": "https://www.news24.com/arc/outboundfeeds/rss/?outputType=xml"},
+    {"name": "AllAfrica", "url": "https://allafrica.com/tools/headlines/rdf/latest/headlines.rdf"},
+    {"name": "Daily Nation Kenya", "url": "https://nation.africa/kenya/rss"},
     
     # South America
-    {"name": "Buenos Aires Herald", "url": "https://www.buenosairesherald.com/rss", "region": "South America"},
-    {"name": "Brazil News", "url": "https://rss.cnn.com/rss/edition_americas.rss", "region": "South America"},
+    {"name": "Buenos Aires Herald", "url": "https://www.buenosairesherald.com/rss"},
+    {"name": "Brazil News", "url": "https://rss.cnn.com/rss/edition_americas.rss"},
     
     # Business & Tech (Global)
-    {"name": "CNBC", "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html", "region": "Global"},
-    {"name": "Bloomberg", "url": "https://feeds.bloomberg.com/markets/news.rss", "region": "Global"},
-    {"name": "MarketWatch", "url": "http://feeds.marketwatch.com/marketwatch/topstories/", "region": "Global"},
-    {"name": "Forbes", "url": "https://www.forbes.com/news/index.xml", "region": "Global"},
-    {"name": "TechCrunch", "url": "http://feeds.feedburner.com/TechCrunch/", "region": "Global"},
-    {"name": "The Verge", "url": "https://www.theverge.com/rss/index.xml", "region": "Global"},
-    {"name": "Wired", "url": "https://www.wired.com/feed/rss", "region": "Global"},
-    {"name": "Ars Technica", "url": "http://feeds.arstechnica.com/arstechnica/index", "region": "Global"},
-    {"name": "Engadget", "url": "https://www.engadget.com/rss.xml", "region": "Global"},
-    {"name": "Mashable", "url": "http://feeds.mashable.com/Mashable", "region": "Global"},
+    {"name": "CNBC", "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html"},
+    {"name": "Bloomberg", "url": "https://feeds.bloomberg.com/markets/news.rss"},
+    {"name": "MarketWatch", "url": "http://feeds.marketwatch.com/marketwatch/topstories/"},
+    {"name": "Forbes", "url": "https://www.forbes.com/news/index.xml"},
+    {"name": "TechCrunch", "url": "http://feeds.feedburner.com/TechCrunch/"},
+    {"name": "The Verge", "url": "https://www.theverge.com/rss/index.xml"},
+    {"name": "Wired", "url": "https://www.wired.com/feed/rss"},
+    {"name": "Ars Technica", "url": "http://feeds.arstechnica.com/arstechnica/index"},
+    {"name": "Engadget", "url": "https://www.engadget.com/rss.xml"},
+    {"name": "Mashable", "url": "http://feeds.mashable.com/Mashable"},
     
     # Sports (Global)
-    {"name": "ESPN", "url": "https://www.espn.com/espn/rss/news", "region": "Global"},
-    {"name": "Sports Illustrated", "url": "https://www.si.com/rss/si_topstories.rss", "region": "Global"},
-    {"name": "BBC Sport", "url": "http://feeds.bbci.co.uk/sport/rss.xml", "region": "Global"},
-    {"name": "Sky Sports", "url": "http://www.skysports.com/rss/12040", "region": "Global"},
+    {"name": "ESPN", "url": "https://www.espn.com/espn/rss/news"},
+    {"name": "Sports Illustrated", "url": "https://www.si.com/rss/si_topstories.rss"},
+    {"name": "BBC Sport", "url": "http://feeds.bbci.co.uk/sport/rss.xml"},
+    {"name": "Sky Sports", "url": "http://www.skysports.com/rss/12040"},
 ]
 
 # Enhanced topic classification with context patterns
@@ -223,61 +226,393 @@ TOPIC_PATTERNS = {
     }
 }
 
-# Enhanced region patterns for better context detection
-REGION_PATTERNS = {
-    'North America': {
-        'countries': ['usa', 'united states', 'america', 'us', 'canada', 'mexico'],
-        'cities': ['new york', 'los angeles', 'chicago', 'toronto', 'vancouver', 'mexico city', 'washington', 'boston', 'miami', 'seattle', 'montreal', 'ottawa'],
-        'context_patterns': [
-            r'\b(president|congress|senate|house)\s+(of|in)\s+(america|usa|us)',
-            r'\b(canadian|american|mexican)\s+(government|prime minister|president)',
-            r'\bin\s+(america|usa|canada|mexico|united states)'
-        ]
-    },
-    'Europe': {
-        'countries': ['uk', 'britain', 'england', 'france', 'germany', 'italy', 'spain', 'netherlands', 'belgium', 'sweden', 'norway', 'poland', 'ukraine', 'russia'],
-        'cities': ['london', 'paris', 'berlin', 'rome', 'madrid', 'amsterdam', 'brussels', 'stockholm', 'oslo', 'warsaw', 'kiev', 'moscow'],
-        'context_patterns': [
-            r'\b(european|eu|brexit|schengen)',
-            r'\b(prime minister|chancellor|president)\s+(of|in)\s+(uk|britain|france|germany)',
-            r'\bin\s+(europe|eu|britain|france|germany|italy|spain)'
-        ]
-    },
-    'Asia-Pacific': {
-        'countries': ['china', 'japan', 'korea', 'india', 'australia', 'indonesia', 'thailand', 'vietnam', 'singapore', 'malaysia', 'philippines'],
-        'cities': ['beijing', 'shanghai', 'tokyo', 'seoul', 'mumbai', 'delhi', 'sydney', 'melbourne', 'singapore', 'bangkok', 'manila'],
-        'context_patterns': [
-            r'\b(asian|chinese|japanese|korean|indian|australian)',
-            r'\b(prime minister|president|emperor)\s+(of|in)\s+(china|japan|korea|india|australia)',
-            r'\bin\s+(asia|china|japan|korea|india|australia|southeast asia)'
-        ]
-    },
-    'Middle East': {
-        'countries': ['israel', 'palestine', 'iran', 'iraq', 'syria', 'lebanon', 'jordan', 'saudi arabia', 'uae', 'turkey', 'egypt'],
-        'cities': ['jerusalem', 'tel aviv', 'tehran', 'baghdad', 'damascus', 'beirut', 'amman', 'riyadh', 'dubai', 'istanbul', 'cairo'],
-        'context_patterns': [
-            r'\b(middle east|gaza|west bank|gulf)',
-            r'\b(israeli|palestinian|iranian|iraqi|syrian|lebanese)',
-            r'\bin\s+(israel|palestine|iran|iraq|syria|lebanon|middle east)'
-        ]
-    },
-    'Africa': {
-        'countries': ['south africa', 'nigeria', 'kenya', 'egypt', 'morocco', 'algeria', 'tunisia', 'ethiopia', 'ghana', 'zimbabwe'],
-        'cities': ['cape town', 'johannesburg', 'lagos', 'nairobi', 'cairo', 'casablanca', 'algiers', 'tunis', 'addis ababa', 'accra'],
-        'context_patterns': [
-            r'\b(african|south african|nigerian|kenyan|egyptian)',
-            r'\bin\s+(africa|south africa|nigeria|kenya|egypt|morocco)'
-        ]
-    },
-    'South America': {
-        'countries': ['brazil', 'argentina', 'chile', 'colombia', 'peru', 'venezuela', 'ecuador', 'bolivia', 'uruguay', 'paraguay'],
-        'cities': ['sao paulo', 'rio de janeiro', 'buenos aires', 'santiago', 'bogota', 'lima', 'caracas', 'quito', 'montevideo'],
-        'context_patterns': [
-            r'\b(south american|brazilian|argentinian|chilean|colombian)',
-            r'\bin\s+(south america|brazil|argentina|chile|colombia|peru)'
-        ]
+class Sentiment:
+    """VADER bands already used for the good / neutral / bad label."""
+
+    POSITIVE = 0.05
+    NEGATIVE = -0.05
+
+    @staticmethod
+    def label(compound):
+        if compound >= Sentiment.POSITIVE:
+            return 'positive'
+        if compound <= Sentiment.NEGATIVE:
+            return 'negative'
+        return 'neutral'
+
+    @staticmethod
+    def rounded(compound, label=None):
+        """Three decimal places, kept inside the same band as the label."""
+        score = round(float(compound), 3)
+        if label == 'positive' and score < Sentiment.POSITIVE:
+            return Sentiment.POSITIVE
+        if label == 'negative' and score > Sentiment.NEGATIVE:
+            return Sentiment.NEGATIVE
+        if label == 'neutral' and score >= Sentiment.POSITIVE:
+            return 0.049
+        if label == 'neutral' and score <= Sentiment.NEGATIVE:
+            return -0.049
+        return score
+
+
+class Regions:
+    """One outlet -> region map. Unknown outlets are Global."""
+
+    FALLBACK = 'Global'
+    OUTLETS = {
+        'BBC News': 'Global',
+        'CNN': 'North America',
+        'Reuters': 'Global',
+        'AP News': 'North America',
+        'NPR': 'North America',
+        'CBS News': 'North America',
+        'ABC News': 'North America',
+        'Fox News': 'North America',
+        'NBC News': 'North America',
+        'USA Today': 'North America',
+        'Wall Street Journal': 'North America',
+        'New York Times': 'North America',
+        'Washington Post': 'North America',
+        'CBC News': 'North America',
+        'Toronto Star': 'North America',
+        'The Guardian': 'Europe',
+        'Financial Times': 'Europe',
+        'The Times': 'Europe',
+        'Independent': 'Europe',
+        'Telegraph': 'Europe',
+        'Sky News': 'Europe',
+        'Euronews': 'Europe',
+        'Deutsche Welle': 'Europe',
+        'France 24': 'Europe',
+        'RT News': 'Europe',
+        'Sputnik News': 'Europe',
+        'Irish Times': 'Europe',
+        'Al Jazeera English': 'Middle East',
+        'South China Morning Post': 'Asia-Pacific',
+        'Japan Times': 'Asia-Pacific',
+        'The Hindu': 'Asia-Pacific',
+        'Times of India': 'Asia-Pacific',
+        'Straits Times': 'Asia-Pacific',
+        'Australian Broadcasting Corporation': 'Asia-Pacific',
+        'New Zealand Herald': 'Asia-Pacific',
+        'Korean Herald': 'Asia-Pacific',
+        'Channel News Asia': 'Asia-Pacific',
+        'Jerusalem Post': 'Middle East',
+        'Haaretz': 'Middle East',
+        'Middle East Eye': 'Middle East',
+        'Times of Israel': 'Middle East',
+        'Daily News Egypt': 'Middle East',
+        'News24 South Africa': 'Africa',
+        'AllAfrica': 'Africa',
+        'Daily Nation Kenya': 'Africa',
+        'Buenos Aires Herald': 'South America',
+        'Brazil News': 'Global',
+        'CNBC': 'Global',
+        'Bloomberg': 'Global',
+        'MarketWatch': 'Global',
+        'Forbes': 'Global',
+        'TechCrunch': 'Global',
+        'The Verge': 'Global',
+        'Wired': 'Global',
+        'Ars Technica': 'Global',
+        'Engadget': 'Global',
+        'Mashable': 'Global',
+        'ESPN': 'Global',
+        'Sports Illustrated': 'Global',
+        'BBC Sport': 'Global',
+        'Sky Sports': 'Global',
     }
-}
+    # Named here so a run reports them instead of silently guessing.
+    UNCERTAIN = {
+        'Brazil News': (
+            'The feed URL is CNN Americas (rss.cnn.com/rss/edition_americas.rss), '
+            'not a Brazilian newsroom, so it stays Global.'
+        ),
+    }
+
+    @staticmethod
+    def for_source(name):
+        if not name:
+            return Regions.FALLBACK
+        return Regions.OUTLETS.get(name, Regions.FALLBACK)
+
+    @staticmethod
+    def report(seen):
+        print('Outlets not confidently placed:')
+        for name, reason in Regions.UNCERTAIN.items():
+            print(f'  {name}: {reason}')
+        missing = sorted({name for name in seen if name and name not in Regions.OUTLETS})
+        if missing:
+            print('Outlets missing from the region map, scored as Global:')
+            for name in missing:
+                print(f'  {name}')
+        else:
+            print('Every outlet in this run is on the region map.')
+        return missing
+
+
+class Dates:
+    """Parse a feed timestamp in that outlet's zone and emit UTC ISO-8601.
+
+    ISO-8601 is read as written. dateutil's day-first mode swaps YYYY-MM-DD,
+    which is how a September date can come out as 9 January. Numeric dates
+    use the outlet's day/month order. Stamps more than an hour ahead are dropped.
+    """
+
+    GRACE = timedelta(hours=1)
+    # Named zones dateutil no longer guesses. Explicit names beat the outlet default.
+    TZINFOS = {
+        'EST': ZoneInfo('America/New_York'),
+        'EDT': ZoneInfo('America/New_York'),
+        'CST': ZoneInfo('America/Chicago'),
+        'CDT': ZoneInfo('America/Chicago'),
+        'MST': ZoneInfo('America/Denver'),
+        'MDT': ZoneInfo('America/Denver'),
+        'PST': ZoneInfo('America/Los_Angeles'),
+        'PDT': ZoneInfo('America/Los_Angeles'),
+        'BST': ZoneInfo('Europe/London'),
+        'GMT': ZoneInfo('UTC'),
+        'UTC': ZoneInfo('UTC'),
+        'CET': ZoneInfo('Europe/Paris'),
+        'CEST': ZoneInfo('Europe/Paris'),
+    }
+    DAY_FIRST = frozenset({
+        'BBC News', 'The Guardian', 'Financial Times', 'The Times', 'Independent',
+        'Telegraph', 'Sky News', 'Euronews', 'Deutsche Welle', 'France 24',
+        'RT News', 'Sputnik News', 'Irish Times', 'Al Jazeera English',
+        'South China Morning Post', 'The Hindu', 'Times of India', 'Straits Times',
+        'Australian Broadcasting Corporation', 'New Zealand Herald', 'Channel News Asia',
+        'Jerusalem Post', 'Haaretz', 'Middle East Eye', 'Times of Israel',
+        'Daily News Egypt', 'News24 South Africa', 'AllAfrica', 'Daily Nation Kenya',
+        'Buenos Aires Herald', 'BBC Sport', 'Sky Sports',
+    })
+    ZONES = {
+        'BBC News': 'Europe/London',
+        'CNN': 'America/New_York',
+        'Reuters': 'UTC',
+        'AP News': 'America/New_York',
+        'NPR': 'America/New_York',
+        'CBS News': 'America/New_York',
+        'ABC News': 'America/New_York',
+        'Fox News': 'America/New_York',
+        'NBC News': 'America/New_York',
+        'USA Today': 'America/New_York',
+        'Wall Street Journal': 'America/New_York',
+        'New York Times': 'America/New_York',
+        'Washington Post': 'America/New_York',
+        'CBC News': 'America/Toronto',
+        'Toronto Star': 'America/Toronto',
+        'The Guardian': 'Europe/London',
+        'Financial Times': 'Europe/London',
+        'The Times': 'Europe/London',
+        'Independent': 'Europe/London',
+        'Telegraph': 'Europe/London',
+        'Sky News': 'Europe/London',
+        'Euronews': 'Europe/Paris',
+        'Deutsche Welle': 'Europe/Berlin',
+        'France 24': 'Europe/Paris',
+        'RT News': 'Europe/Moscow',
+        'Sputnik News': 'Europe/Moscow',
+        'Irish Times': 'Europe/Dublin',
+        'Al Jazeera English': 'Asia/Qatar',
+        'South China Morning Post': 'Asia/Hong_Kong',
+        'Japan Times': 'Asia/Tokyo',
+        'The Hindu': 'Asia/Kolkata',
+        'Times of India': 'Asia/Kolkata',
+        'Straits Times': 'Asia/Singapore',
+        'Australian Broadcasting Corporation': 'Australia/Sydney',
+        'New Zealand Herald': 'Pacific/Auckland',
+        'Korean Herald': 'Asia/Seoul',
+        'Channel News Asia': 'Asia/Singapore',
+        'Jerusalem Post': 'Asia/Jerusalem',
+        'Haaretz': 'Asia/Jerusalem',
+        'Middle East Eye': 'Europe/London',
+        'Times of Israel': 'Asia/Jerusalem',
+        'Daily News Egypt': 'Africa/Cairo',
+        'News24 South Africa': 'Africa/Johannesburg',
+        'AllAfrica': 'UTC',
+        'Daily Nation Kenya': 'Africa/Nairobi',
+        'Buenos Aires Herald': 'America/Argentina/Buenos_Aires',
+        'Brazil News': 'America/New_York',
+        'CNBC': 'America/New_York',
+        'Bloomberg': 'America/New_York',
+        'MarketWatch': 'America/New_York',
+        'Forbes': 'America/New_York',
+        'TechCrunch': 'America/New_York',
+        'The Verge': 'America/New_York',
+        'Wired': 'America/New_York',
+        'Ars Technica': 'America/New_York',
+        'Engadget': 'America/New_York',
+        'Mashable': 'America/New_York',
+        'ESPN': 'America/New_York',
+        'Sports Illustrated': 'America/New_York',
+        'BBC Sport': 'Europe/London',
+        'Sky Sports': 'Europe/London',
+    }
+
+    @staticmethod
+    def to_iso(dt):
+        utc = dt.astimezone(timezone.utc).replace(microsecond=0)
+        return utc.isoformat(timespec='seconds')
+
+    @staticmethod
+    def now_iso(now=None):
+        return Dates.to_iso(now or datetime.now(timezone.utc))
+
+    @staticmethod
+    def _parse_string(text, day_first):
+        text = str(text).strip()
+        if not text:
+            return None
+        iso_text = text[:-1] + '+00:00' if text.endswith(('Z', 'z')) else text
+        looks_iso = len(iso_text) >= 10 and iso_text[4] == '-' and iso_text[7] == '-'
+        if looks_iso:
+            try:
+                return datetime.fromisoformat(iso_text)
+            except ValueError:
+                day_first = False
+        try:
+            return dateparser.parse(text, dayfirst=day_first, fuzzy=False, tzinfos=Dates.TZINFOS)
+        except (ValueError, OverflowError, TypeError):
+            pass
+        if not looks_iso:
+            try:
+                return dateparser.parse(text, dayfirst=not day_first, fuzzy=False, tzinfos=Dates.TZINFOS)
+            except (ValueError, OverflowError, TypeError):
+                return None
+        return None
+
+    @staticmethod
+    def _with_zone(dt, source):
+        if dt.tzinfo is not None and dt.tzinfo.utcoffset(dt) is not None:
+            return dt
+        return dt.replace(tzinfo=ZoneInfo(Dates.ZONES.get(source, 'UTC')))
+
+    @staticmethod
+    def parse(value, source=''):
+        if isinstance(value, datetime):
+            parsed = value
+        elif isinstance(value, time.struct_time):
+            parsed = datetime(*value[:6], tzinfo=timezone.utc)
+        else:
+            parsed = Dates._parse_string(value, source in Dates.DAY_FIRST)
+        if parsed is None:
+            return None
+        return Dates._with_zone(parsed, source).astimezone(timezone.utc)
+
+    @staticmethod
+    def iso(value, source='', now=None):
+        parsed = Dates.parse(value, source)
+        if parsed is None:
+            return None
+        limit = (now or datetime.now(timezone.utc)).astimezone(timezone.utc) + Dates.GRACE
+        if parsed > limit:
+            return None
+        return Dates.to_iso(parsed)
+
+
+class Headlines:
+    @staticmethod
+    def canonical_url(url):
+        if not url or not str(url).strip():
+            return ''
+        parts = urlsplit(str(url).strip())
+        path = parts.path or ''
+        if path == '/':
+            path = ''
+        elif path.endswith('/'):
+            path = path.rstrip('/')
+        query = urlencode([
+            (key, value)
+            for key, value in parse_qsl(parts.query, keep_blank_values=True)
+            if not key.lower().startswith('utm_')
+        ])
+        return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, query, ''))
+
+    @staticmethod
+    def normal_text(value):
+        text = unicodedata.normalize('NFKC', value or '')
+        for src, dst in (
+            ('\u2018', "'"), ('\u2019', "'"), ('\u201b', "'"), ('\u2032', "'"),
+            ('\u201c', '"'), ('\u201d', '"'),
+        ):
+            text = text.replace(src, dst)
+        return re.sub(r'\s+', ' ', text).strip().casefold()
+
+    @staticmethod
+    def dedupe(articles):
+        """Keep the earliest published copy. URL first, then title+source."""
+        ordered = []
+        for index, article in enumerate(articles):
+            parsed = Dates.parse(article.get('published'), article.get('source', ''))
+            stamp = parsed or datetime.max.replace(tzinfo=timezone.utc)
+            ordered.append((stamp, index, article))
+        ordered.sort(key=lambda row: (row[0], row[1]))
+
+        seen_urls = set()
+        seen_titles = set()
+        kept = []
+        for _, _, article in ordered:
+            url = Headlines.canonical_url(article.get('url'))
+            title = Headlines.normal_text(article.get('title'))
+            source = Headlines.normal_text(article.get('source'))
+            title_key = (title, source) if title else None
+            if url and url in seen_urls:
+                continue
+            if title_key and title_key in seen_titles:
+                continue
+            if url:
+                seen_urls.add(url)
+            if title_key:
+                seen_titles.add(title_key)
+            kept.append(article)
+        return kept
+
+    @staticmethod
+    def prepare(article, now, stats):
+        source = article.get('source') or ''
+        if source:
+            stats['seen'].add(source)
+        parsed = Dates.parse(article.get('published'), source)
+        if parsed is None:
+            stats['unparsed'] += 1
+            if len(stats['unparsed_examples']) < 5:
+                stats['unparsed_examples'].append((source, article.get('published'), (article.get('title') or '')[:80]))
+            return None
+        if parsed > now.astimezone(timezone.utc) + Dates.GRACE:
+            stats['future'] += 1
+            if len(stats['future_examples']) < 5:
+                stats['future_examples'].append((source, article.get('published'), article.get('title', '')[:80]))
+            return None
+        prepared = dict(article)
+        prepared['published'] = Dates.to_iso(parsed)
+        prepared['region'] = Regions.for_source(source)
+        if prepared['published'] != (article.get('published') or ''):
+            stats['dates_rewritten'] += 1
+        compound = prepared.get('sentiment_score', prepared.get('score'))
+        if compound is not None:
+            prepared['score'] = Sentiment.rounded(compound, prepared.get('sentiment'))
+        return prepared
+
+    @staticmethod
+    def public(article, include_topic=False):
+        row = {
+            'title': article['title'],
+            'url': article['url'],
+            'source': article['source'],
+            'region': article.get('region', Regions.FALLBACK),
+            'published': article['published'],
+            'sentiment': article['sentiment'],
+        }
+        if article.get('score') is not None:
+            row['score'] = article['score']
+        if include_topic:
+            summary = article.get('summary') or ''
+            row['topic'] = article.get('topic', 'Other')
+            row['summary'] = (summary[:200] + '...') if summary else ''
+        return row
+
+
 
 def classify_sentiment_enhanced(title: str, summary: str = "") -> dict:
     """Enhanced sentiment classification with context awareness"""
@@ -312,17 +647,11 @@ def classify_sentiment_enhanced(title: str, summary: str = "") -> dict:
         if re.search(pattern, text_lower):
             compound -= 0.1
     
-    # Classify based on adjusted compound score
-    if compound >= 0.05:
-        label = 'positive'
-    elif compound <= -0.05:
-        label = 'negative'
-    else:
-        label = 'neutral'
-    
+    label = Sentiment.label(compound)
     return {
         'label': label,
         'compound': compound,
+        'score': Sentiment.rounded(compound, label),
         'scores': scores
     }
 
@@ -352,122 +681,63 @@ def classify_topic_enhanced(title: str, summary: str = "") -> str:
         return max(scores, key=scores.get)
     return 'Other'
 
-def classify_region_enhanced(title: str, summary: str = "", source: str = "") -> str:
-    """Enhanced region classification using context patterns"""
-    full_text = f"{title} {summary} {source}".lower()
-    
-    scores = {}
-    
-    for region, patterns in REGION_PATTERNS.items():
-        score = 0
-        
-        # Check context patterns (highest weight)
-        for pattern in patterns['context_patterns']:
-            if re.search(pattern, full_text, re.IGNORECASE):
-                score += 5
-        
-        # Check countries (medium weight)
-        for country in patterns['countries']:
-            if country in full_text:
-                score += 2
-        
-        # Check cities (lower weight)
-        for city in patterns['cities']:
-            if city in full_text:
-                score += 1
-        
-        scores[region] = score
-    
-    # Return region with highest score
-    if scores and max(scores.values()) > 0:
-        return max(scores, key=scores.get)
-    
-    # Fallback to source-based region mapping
-    source_lower = source.lower()
-    if any(term in source_lower for term in ['cnn', 'fox', 'nbc', 'abc', 'cbs', 'npr', 'usa today', 'wall street', 'new york times', 'washington post']):
-        return 'North America'
-    elif any(term in source_lower for term in ['bbc', 'guardian', 'reuters', 'sky', 'telegraph', 'independent']):
-        return 'Europe'
-    elif any(term in source_lower for term in ['al jazeera', 'jerusalem post', 'haaretz']):
-        return 'Middle East'
-    elif any(term in source_lower for term in ['scmp', 'japan times', 'hindu', 'times of india']):
-        return 'Asia-Pacific'
-    
-    return 'Global'
-
-# Legacy function wrappers for compatibility
-def classify_sentiment(text: str) -> dict:
-    """Wrapper for legacy compatibility"""
-    return classify_sentiment_enhanced(text)
-
-def classify_topic(text: str) -> str:
-    """Wrapper for legacy compatibility"""
-    return classify_topic_enhanced(text)
-
 def generate_article_id(title: str, url: str) -> str:
     """Generate unique ID for article"""
     return hashlib.md5(f"{title}#{url}".encode()).hexdigest()
 
-def parse_date(date_str):
-    """Parse various date formats"""
-    if not date_str:
-        return datetime.now(timezone.utc)
-    
+def entry_published(entry):
+    """Raw feed timestamp. Structured UTC is only a fallback when the string is missing."""
+    raw = entry.get('published') or entry.get('updated') or ''
+    if raw:
+        return raw
+    parsed = entry.get('published_parsed')
+    if not parsed:
+        return ''
     try:
-        # Try parsing with dateutil
-        dt = dateparser.parse(date_str)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt
-    except:
-        return datetime.now(timezone.utc)
+        return time.strftime('%Y-%m-%dT%H:%M:%S+00:00', parsed)
+    except (TypeError, ValueError):
+        return ''
 
 def fetch_rss_feeds():
     """Fetch articles from all RSS feeds"""
     articles = []
     
     for feed_config in FEEDS:
-        print(f"Fetching {feed_config['name']} ({feed_config['region']})...")
+        source = feed_config['name']
+        print(f"Fetching {source} ({Regions.for_source(source)})...")
         
         try:
             feed = feedparser.parse(feed_config['url'])
             
             for entry in feed.entries:
-                # Extract article data
                 title = entry.get('title', '')
                 url = entry.get('link', '')
-                published = parse_date(entry.get('published'))
                 summary = entry.get('summary', '') or entry.get('description', '')
                 
-                # Skip if essential data missing
                 if not title or not url:
                     continue
                 
-                # Combine title and summary for analysis
+                # Same text the label was already scored on.
                 full_text = f"{title}. {summary}"
-                
-                # Enhanced classification
                 sentiment = classify_sentiment_enhanced(full_text)
                 topic = classify_topic_enhanced(title, summary)
-                region = classify_region_enhanced(title, summary, feed_config['name'])
                 
-                article = {
+                articles.append({
                     'id': generate_article_id(title, url),
                     'title': title,
                     'url': url,
-                    'source': feed_config['name'],
-                    'region': region,  # Now uses enhanced classification
-                    'published': published.isoformat(),
+                    'source': source,
+                    'region': Regions.for_source(source),
+                    'published': entry_published(entry),
                     'sentiment': sentiment['label'],
                     'sentiment_score': sentiment['compound'],
-                    'topic': topic,  # Now uses enhanced classification
+                    'score': sentiment['score'],
+                    'topic': topic,
                     'summary': summary
-                }
-                
-                articles.append(article)
+                })
                 
         except Exception as e:
-            print(f"Error fetching {feed_config['name']}: {e}")
+            print(f"Error fetching {source}: {e}")
             continue
     
     return articles
@@ -499,19 +769,15 @@ def save_articles(articles):
         for article in articles:
             f.write(json.dumps(article) + '\n')
 
-def filter_recent_articles(articles, hours=24):
-    """Filter articles from last N hours"""
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
-    
+def filter_recent_articles(articles, hours, now):
+    """Articles from the last N hours, excluding impossible future stamps."""
+    cutoff = now - timedelta(hours=hours)
+    limit = now + Dates.GRACE
     recent = []
     for article in articles:
-        try:
-            pub_date = datetime.fromisoformat(article['published'])
-            if pub_date >= cutoff:
-                recent.append(article)
-        except:
-            continue
-    
+        published = Dates.parse(article.get('published'), article.get('source', ''))
+        if published is not None and cutoff <= published <= limit:
+            recent.append(article)
     return recent
 
 def generate_statistics(articles):
@@ -589,39 +855,17 @@ def generate_statistics(articles):
         'by_publication': by_publication,
         'by_region': by_region,
         'by_topic': by_topic,
-        'sample_headlines': [
-            {
-                'title': a['title'],
-                'url': a['url'],
-                'source': a['source'],
-                'region': a.get('region', 'Global'),
-                'published': a['published'],
-                'sentiment': a['sentiment']
-            }
-            for a in sample_headlines
-        ]
+        'sample_headlines': [Headlines.public(a) for a in sample_headlines]
     }
 
-def save_all_headlines(articles):
-    """Save ALL recent headlines to separate file for the headlines editor"""
+def save_all_headlines(articles, generated_at):
+    """Save ALL recent headlines to separate file for the headlines page"""
     all_headlines = sorted(articles, key=lambda x: x['published'], reverse=True)
     
     headlines_data = {
-        'generated_at': datetime.now(timezone.utc).isoformat(),
+        'generated_at': generated_at,
         'count': len(all_headlines),
-        'headlines': [
-            {
-                'title': a['title'],
-                'url': a['url'],
-                'source': a['source'],
-                'region': a.get('region', 'Global'),
-                'published': a['published'],
-                'sentiment': a['sentiment'],
-                'topic': a['topic'],
-                'summary': a.get('summary', '')[:200] + '...' if a.get('summary', '') else ''
-            }
-            for a in all_headlines
-        ]
+        'headlines': [Headlines.public(a, include_topic=True) for a in all_headlines]
     }
     
     with open(ALL_HEADLINES_PATH, 'w', encoding='utf-8') as f:
@@ -629,18 +873,20 @@ def save_all_headlines(articles):
     
     print(f"📰 Saved {len(all_headlines)} headlines to all_headlines.json")
 
-def generate_history_data(articles):
+def generate_history_data(articles, now):
     """Generate daily sentiment history for the last 7 days"""
     history = []
+    start = now.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     
     for i in range(ROLLING_DAYS):
-        day_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=i)
+        day_start = start - timedelta(days=i)
         day_end = day_start + timedelta(days=1)
         
-        day_articles = [
-            a for a in articles
-            if day_start <= datetime.fromisoformat(a['published']) < day_end
-        ]
+        day_articles = []
+        for article in articles:
+            published = Dates.parse(article.get('published'), article.get('source', ''))
+            if published is not None and day_start <= published < day_end:
+                day_articles.append(article)
         
         sentiment_counts = {'positive': 0, 'neutral': 0, 'negative': 0}
         for article in day_articles:
@@ -655,60 +901,61 @@ def generate_history_data(articles):
 
 def main():
     """Main execution function"""
-    # Set global timeout for socket operations
     socket.setdefaulttimeout(30)
     
     try:
-        print("🔄 Fetching news articles with enhanced classification...")
+        print("🔄 Fetching news articles...")
     
-        # Fetch new articles
         new_articles = fetch_rss_feeds()
+        now = datetime.now(timezone.utc)
+        generated_at = Dates.now_iso(now)
         print(f"📰 Fetched {len(new_articles)} new articles")
         
-        # Load existing articles
         existing_articles = load_existing_articles()
         print(f"📚 Loaded {len(existing_articles)} existing articles")
         
-        # Combine and deduplicate
-        all_articles = existing_articles.copy()
-        existing_ids = {a['id'] for a in existing_articles}
+        stats = {
+            'seen': set(), 'future': 0, 'unparsed': 0, 'dates_rewritten': 0,
+            'future_examples': [], 'unparsed_examples': [],
+        }
+        prepared = []
+        for article in existing_articles + new_articles:
+            ready = Headlines.prepare(article, now, stats)
+            if ready is not None:
+                prepared.append(ready)
+        deduped = Headlines.dedupe(prepared)
+        removed = len(prepared) - len(deduped)
+        print(f"📊 Prepared {len(prepared)}; removed {removed} duplicates")
+        print(f"🗓️  Dropped {stats['future']} future dates and {stats['unparsed']} unparsed dates")
+        print(f"🕒 Rewrote {stats['dates_rewritten']} timestamps to UTC")
+        for source, published, title in stats['future_examples']:
+            print(f"   future dropped: {source} {published} {title}")
+        for source, published, title in stats['unparsed_examples']:
+            print(f"   unparsed dropped: {source} {published!r} {title}")
+        Regions.report(stats['seen'])
         
-        for article in new_articles:
-            if article['id'] not in existing_ids:
-                all_articles.append(article)
-        
-        print(f"📊 Total unique articles: {len(all_articles)}")
-    
-        # Prune articles if exceeding limit
+        all_articles = deduped
         if len(all_articles) > MAX_ARTICLES:
             print(f"✂️ Pruning articles from {len(all_articles)} to {MAX_ARTICLES}...")
-            # Sort by date (newest first) and keep top MAX_ARTICLES
             all_articles.sort(key=lambda x: x['published'], reverse=True)
             all_articles = all_articles[:MAX_ARTICLES]
             print(f"✅ Pruned to {len(all_articles)} articles")
     
-        # Save all articles
         save_articles(all_articles)
         
-        # Generate latest dashboard data (last 24 hours)
-        recent_articles = filter_recent_articles(all_articles, hours=24)
+        recent_articles = filter_recent_articles(all_articles, hours=24, now=now)
         print(f"🕐 Recent articles (24h): {len(recent_articles)}")
         
         latest_stats = generate_statistics(recent_articles)
+        save_all_headlines(recent_articles, generated_at)
         
-        # Save ALL recent headlines for the headlines editor
-        save_all_headlines(recent_articles)
+        week_articles = filter_recent_articles(all_articles, hours=24 * ROLLING_DAYS, now=now)
+        history_data = generate_history_data(week_articles, now)
         
-        # Generate history data (last 7 days)
-        week_articles = filter_recent_articles(all_articles, hours=24*ROLLING_DAYS)
-        history_data = generate_history_data(week_articles)
-        
-        # Ensure output directory exists
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         
-        # Save latest data
         latest_output = {
-            'generated_at': datetime.now(timezone.utc).isoformat(),
+            'generated_at': generated_at,
             'window_hours': 24,
             **latest_stats
         }
@@ -716,16 +963,15 @@ def main():
         with open(LATEST_PATH, 'w', encoding='utf-8') as f:
             json.dump(latest_output, f, indent=2)
         
-        # Save history data
         history_output = {
-            'generated_at': datetime.now(timezone.utc).isoformat(),
+            'generated_at': generated_at,
             'history': history_data
         }
         
         with open(HISTORY_PATH, 'w', encoding='utf-8') as f:
             json.dump(history_output, f, indent=2)
         
-        print(f"✅ Enhanced dashboard data updated!")
+        print("✅ Dashboard data updated")
         print(f"📈 Sentiment distribution: {latest_stats['totals']}")
         print(f"🌍 Regions covered: {len(latest_stats['by_region'])}")
         print(f"📋 Topics covered: {len(latest_stats['by_topic'])}")

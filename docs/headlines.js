@@ -1,4 +1,4 @@
-import { Dom, Feed, Score } from './score.js';
+import { Dom, Feed, Score } from './score.js?v=4';
 
 const SEARCH_ICON = '<circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>';
 const CHEVRON = '<path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
@@ -418,8 +418,11 @@ class HeadlinesPage {
     }
     this.rows.replaceChildren(...visible.map((item) => this.row(item)));
     const more = matched.length - visible.length;
-    this.loadRow.replaceChildren(
-      more > 0 ? Dom.el('button', {
+    const footer = [
+      Dom.el('span', { class: 'small muted', text: `Showing ${Score.formatCount(visible.length)} of ${Score.formatCount(matched.length)}` }),
+    ];
+    if (more > 0) {
+      footer.unshift(Dom.el('button', {
         class: 'btn btn-ghost',
         type: 'button',
         text: `Load ${Math.min(50, more)} more`,
@@ -427,9 +430,9 @@ class HeadlinesPage {
           this.shown += 50;
           this.paint();
         },
-      }) : null,
-      Dom.el('span', { class: 'small muted', text: `Showing ${Score.formatCount(visible.length)} of ${Score.formatCount(matched.length)}` }),
-    );
+      }));
+    }
+    this.loadRow.replaceChildren(...footer);
   }
 
   chip(key, label, count) {
@@ -469,7 +472,7 @@ class HeadlinesPage {
 
   row(item) {
     const side = Score.sentimentKey(item.sentiment);
-    const meta = [item.source, item.region, item.topic].filter(Boolean).join(' · ');
+    const meta = [item.source, item.region, item.topic, Score.formatScore(item.score)].filter(Boolean).join(' · ');
     return Dom.el('a', {
       class: 'hline',
       href: item.url || '#',
