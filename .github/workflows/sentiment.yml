@@ -37,6 +37,11 @@ jobs:
           path: nltk_data
           key: nltk-data-vader
       
+      - name: Run checks
+        env:
+          NLTK_DATA: ${{ github.workspace }}/nltk_data
+        run: python tests/test_fetcher.py
+
       - name: Run fetcher
         env:
           NLTK_DATA: ${{ github.workspace }}/nltk_data

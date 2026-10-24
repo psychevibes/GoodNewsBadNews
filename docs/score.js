@@ -27,6 +27,17 @@ export class Score {
     return (Math.round((value + Number.EPSILON) * 10) / 10).toFixed(1);
   }
 
+  /** Adjusted score on [-1, 1], two decimals, with a sign. Minus is U+2212. */
+  static formatScore(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return '';
+    const clamped = Math.max(-1, Math.min(1, number));
+    const abs = Math.abs(clamped).toFixed(2);
+    if (clamped > 0) return `+${abs}`;
+    if (clamped < 0) return `\u2212${abs}`;
+    return '0.00';
+  }
+
   static formatPercent(count, total) {
     if (!total) return '0.0%';
     return `${this.format1((count / total) * 100)}%`;
