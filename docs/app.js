@@ -1,4 +1,4 @@
-import { Dom, Feed, Score } from './score.js?v=5';
+import { Dom, Feed, Score } from './score.js?v=6';
 
 const ICONS = {
   alert: '<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 8v5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 16.5h.01" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>',
@@ -293,14 +293,16 @@ class Dashboard {
     const topics = [...(latest.by_topic || [])].sort((a, b) => b.count - a.count);
     const regionGroup = this.meterGroup('By region', regions, 'region');
     const globalCount = global ? global.count : 0;
-    regionGroup.append(Dom.el('p', {
-      class: 'meter-aside',
-      text: `Global is separate: ${Score.formatCount(globalCount)} headlines (${Score.formatPercent(globalCount, total)}) from outlets with no home region. They are not a bar.`,
-    }));
+    if (globalCount > 0) {
+      regionGroup.append(Dom.el('p', {
+        class: 'meter-aside',
+        text: `${Score.formatCount(globalCount)} headlines (${Score.formatPercent(globalCount, total)}) from international outlets aren't counted in a region.`,
+      }));
+    }
     return Dom.el('section', { id: 'where', 'aria-labelledby': 'where-title' }, [
       Dom.el('div', { class: 'section-head' }, [
         Dom.el('h2', { id: 'where-title', text: "Who's winning where" }),
-        Dom.el('p', { class: 'muted', text: 'Each bar is one home region or topic over the last 24 hours. A tie is under 2 points. Smaller samples are faded. Global is counted beside the region bars.' }),
+        Dom.el('p', { class: 'muted', text: 'Each bar is one home region or topic over the last 24 hours. A tie is under 2 points. Smaller samples are faded.' }),
       ]),
       Dom.el('div', { class: 'where-grid', style: 'margin-top: 8px' }, [
         regionGroup,

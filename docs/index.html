@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css?v=4" />
-  <script type="module" src="app.js?v=4"></script>
+  <script type="module" src="app.js?v=5"></script>
 </head>
 <body data-page="dashboard">
   <a class="skip" href="#main">Skip to the score</a>
@@ -42,7 +42,7 @@
           <span class="logo-bad">Bad news</span>
         </a>
         <h2 style="margin-top: 24px">How the score works</h2>
-        <p>Every headline from <span data-feed-count>the</span> RSS feeds is scored on its title and RSS summary, not the full article. The raw VADER compound, published as vader, stays between −1 and +1. Matching keyword patterns then add or subtract 0.1, and the score on each row is that adjusted value clamped to −1…+1. A score ≥ 0.05 counts as good, ≤ −0.05 as bad, and anything between is neutral. Sarcasm and context can still fool it.</p>
+        <p>Each headline's title and summary is scored from −1 (very bad) to +1 (very good). Zero is in the middle. We call it good news at 0.05 or above, and bad news at −0.05 or below. A few strong words can nudge the result, and scores are capped at ±1. We don't read the full article, so sarcasm and context can still fool it.</p>
       </div>
       <div>
         <h2>Freshness</h2>

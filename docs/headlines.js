@@ -1,4 +1,4 @@
-import { Dom, Feed, Score } from './score.js?v=5';
+import { Dom, Feed, Score } from './score.js?v=6';
 
 const SEARCH_ICON = '<circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>';
 const CHEVRON = '<path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
@@ -481,7 +481,7 @@ class HeadlinesPage {
       when.push(Dom.el('span', {
         class: 'hline-score',
         'aria-label': `score ${formatted}`,
-        title: 'How we score: the title and RSS summary. See How the score works at the bottom of this page.',
+        title: 'Title and summary, scored from \u22121 (very bad) to +1 (very good). Scores are capped at \u00b11 \u2014 about 7% of rows sit at \u00b11.00. See How the score works at the bottom of this page.',
       }, [
         Dom.el('span', { class: 'hline-score-label', text: 'score ' }),
         formatted,
@@ -510,7 +510,7 @@ class HeadlinesPage {
       this.glanceCard('neutral', 'Neutral', totals.neutral, total),
       Dom.el('div', { class: 'score-note' }, [
         Dom.el('h2', { class: 'h3', text: 'How we score' }),
-        Dom.el('p', { text: 'The title and RSS summary go through VADER. vader is that raw compound, from −1 to +1. Keyword patterns then add or subtract 0.1, and the score on the row is that adjusted value clamped to −1…+1. ≥ 0.05 = good, ≤ −0.05 = bad. It still makes mistakes — nobody edits the results.' }),
+        Dom.el('p', { text: 'Each headline\u2019s title and summary is scored from \u22121 (very bad) to +1 (very good). Good news is 0.05 or above, bad news is \u22120.05 or below, and scores are capped at \u00b11. We don\u2019t read the full article, so it still makes mistakes \u2014 nobody edits the results.' }),
         Dom.el('p', {}, [
           Dom.el('a', {
             href: 'https://github.com/psychevibes/GoodNewsBadNews/issues/new?title=Misread%20headline&body=Paste%20the%20headline%20and%20what%20the%20score%20got%20wrong.',
