@@ -743,6 +743,13 @@ h3, .h3 {
 .meter.is-short .meter-fill { opacity: 0.45; }
 .meter.is-short .meter-result { color: var(--text-muted); }
 
+.meter-aside {
+  margin: var(--space-4) 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 20px;
+}
+
 @media (min-width: 1024px) {
   .where-grid { grid-template-columns: 1fr 1fr; gap: var(--space-7); }
 }
@@ -921,12 +928,43 @@ h3, .h3 {
 
 .hline-meta { display: block; margin-top: 2px; color: var(--text-muted); font-size: 14px; line-height: 20px; }
 
+.hline-when {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  padding-top: 4px;
+  text-align: right;
+}
+
 .hline time {
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 16px;
   color: var(--text-muted);
-  padding-top: 4px;
+}
+
+.hline-score {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+@media (max-width: 639px) {
+  .hline-score-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
 }
 
 .load-row {
