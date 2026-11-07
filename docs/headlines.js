@@ -1,4 +1,4 @@
-import { Dom, Feed, Score } from './score.js';
+import { Dom, Feed, Score } from './score.js?v=6';
 
 const SEARCH_ICON = '<circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>';
 const CHEVRON = '<path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
@@ -418,8 +418,11 @@ class HeadlinesPage {
     }
     this.rows.replaceChildren(...visible.map((item) => this.row(item)));
     const more = matched.length - visible.length;
-    this.loadRow.replaceChildren(
-      more > 0 ? Dom.el('button', {
+    const footer = [
+      Dom.el('span', { class: 'small muted', text: `Showing ${Score.formatCount(visible.length)} of ${Score.formatCount(matched.length)}` }),
+    ];
+    if (more > 0) {
+      footer.unshift(Dom.el('button', {
         class: 'btn btn-ghost',
         type: 'button',
         text: `Load ${Math.min(50, more)} more`,
@@ -427,9 +430,9 @@ class HeadlinesPage {
           this.shown += 50;
           this.paint();
         },
-      }) : null,
-      Dom.el('span', { class: 'small muted', text: `Showing ${Score.formatCount(visible.length)} of ${Score.formatCount(matched.length)}` }),
-    );
+      }));
+    }
+    this.loadRow.replaceChildren(...footer);
   }
 
   chip(key, label, count) {
@@ -470,6 +473,20 @@ class HeadlinesPage {
   row(item) {
     const side = Score.sentimentKey(item.sentiment);
     const meta = [item.source, item.region, item.topic].filter(Boolean).join(' · ');
+    const formatted = Score.formatScore(item.score);
+    const when = [
+      Dom.el('time', { datetime: item.published || '', text: Score.clock(item.published) }),
+    ];
+    if (formatted) {
+      when.push(Dom.el('span', {
+        class: 'hline-score',
+        'aria-label': `score ${formatted}`,
+        title: 'Title and summary, scored from \u22121 (very bad) to +1 (very good). Scores are capped at \u00b11 \u2014 about 7% of rows sit at \u00b11.00. See How the score works at the bottom of this page.',
+      }, [
+        Dom.el('span', { class: 'hline-score-label', text: 'score ' }),
+        formatted,
+      ]));
+    }
     return Dom.el('a', {
       class: 'hline',
       href: item.url || '#',
@@ -481,7 +498,7 @@ class HeadlinesPage {
         Dom.el('span', { class: 'hline-title', text: item.title }),
         Dom.el('span', { class: 'hline-meta', text: meta }),
       ]),
-      Dom.el('time', { datetime: item.published || '', text: Score.clock(item.published) }),
+      Dom.el('span', { class: 'hline-when' }, when),
     ]);
   }
 
@@ -493,7 +510,7 @@ class HeadlinesPage {
       this.glanceCard('neutral', 'Neutral', totals.neutral, total),
       Dom.el('div', { class: 'score-note' }, [
         Dom.el('h2', { class: 'h3', text: 'How we score' }),
-        Dom.el('p', { text: 'Each headline is run through VADER sentiment. ≥ 0.05 = good, ≤ −0.05 = bad. It reads headlines only, so it makes mistakes — nobody edits the results.' }),
+        Dom.el('p', { text: 'Each headline\u2019s title and summary is scored from \u22121 (very bad) to +1 (very good). Good news is 0.05 or above, bad news is \u22120.05 or below, and scores are capped at \u00b11. We don\u2019t read the full article, so it still makes mistakes \u2014 nobody edits the results.' }),
         Dom.el('p', {}, [
           Dom.el('a', {
             href: 'https://github.com/psychevibes/GoodNewsBadNews/issues/new?title=Misread%20headline&body=Paste%20the%20headline%20and%20what%20the%20score%20got%20wrong.',
