@@ -10,8 +10,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=3" />
-  <script type="module" src="app.js?v=3"></script>
+  <link rel="stylesheet" href="styles.css?v=4" />
+  <script type="module" src="app.js?v=5"></script>
 </head>
 <body data-page="dashboard">
   <a class="skip" href="#main">Skip to the score</a>
@@ -42,7 +42,7 @@
           <span class="logo-bad">Bad news</span>
         </a>
         <h2 style="margin-top: 24px">How the score works</h2>
-        <p>Every headline from <span data-feed-count>the</span> RSS feeds is scored with VADER, a lexicon-based sentiment model: compound ≥ 0.05 counts as good, ≤ −0.05 as bad, anything between is neutral. We score headlines only — not article text — so sarcasm and context can fool it.</p>
+        <p>Each headline's title and summary is scored from −1 (very bad) to +1 (very good). Zero is in the middle. We call it good news at 0.05 or above, and bad news at −0.05 or below. A few strong words can nudge the result, and scores are capped at ±1. We don't read the full article, so sarcasm and context can still fool it.</p>
       </div>
       <div>
         <h2>Freshness</h2>
